@@ -25,6 +25,47 @@ Resolved spec open question §8.5.
 
 `ENABLE_APP_SANDBOX = NO` in the project settings. Hardened runtime stays on. This is a developer tool, not a Mac App Store submission, and sandboxing a Git client costs significant complexity (security-scoped bookmarks for every tracked repo, restrictions on spawning git, etc.) for no upside in this context.
 
+## Comparison model: upstream config is the "other branch"
+
+Gitbox's central toolbar concept is *current branch vs a chosen "other branch"* — a
+remote branch (track/pull/push) or another local branch (compare/merge). Gitpack
+stores that choice as git-native upstream config (`git branch --set-upstream-to=`),
+which accepts local branches as well as remote ones. That one decision buys:
+
+- `git status --porcelain=v2 --branch` reports `branch.ab` (ahead/behind) against
+  either kind of target — one call powers both the toolbar state and sidebar badges.
+- `git pull` honors it natively, and the selection survives outside Gitpack.
+- No app-side persistence of the pairing.
+
+Divergence detail (which commits, for the history dots) comes from
+`git rev-list --left-right current...other`: left = unpushed (green dots),
+right = unmerged (blue dots, shown italic/faded). History lists both branches'
+commits (`git log current other`) so unmerged commits interleave, Gitbox-style.
+
+Pushing uses an explicit refspec (`git push <remote> <current>:<remoteBranch>`)
+derived from the upstream, so differently named local/remote branches work. The
+pull/push toolbar buttons morph with held modifiers (⌥ → Fetch, ⇧⌘ → Rebase /
+Force Push) and collapse to a single Merge button when the other branch is local.
+
+## Autofetch and per-repo background state
+
+`AppState` keeps a `RepoBackgroundState` per sidebar repo (the full
+`RepositoryViewModel` still loads only for the selected one): unpushed/unmerged/
+stage-change counts (the sidebar badge is their sum, as in Gitbox), a fetch
+spinner flag, and failure count. It is fed by a single `git status` call per
+repo — no rev-list needed for counts.
+
+The autofetch loop runs `git fetch` across all repos on a fixed 60s cycle with a
+2s stagger between repos and per-repo exponential backoff on failure (2 min
+doubling to a 30 min cap). Failures are silent — the badge simply doesn't move —
+and all git commands run with `GIT_TERMINAL_PROMPT=0` and `GIT_ASKPASS`/`SSH_ASKPASS`
+pointed at `/usr/bin/false` so auth that would need interaction fails fast instead
+of hanging. Typing a commit message also triggers a fetch (rate-limited to 30s),
+Gitbox's trick so you can pull before committing.
+
+For the selected repo, the fetch's ref writes land via FSEvents (refs →
+`.full` refresh), so blue dots appear without extra wiring.
+
 ## Module layout
 
 ```
@@ -88,4 +129,8 @@ Only the selected repo is watched (that's the only one whose state is on screen)
 
 ## Tests
 
-Not yet wired. The most valuable tests will be parser tests: feed known `git status --porcelain=v2 -z` and `git log` outputs to the parsers and assert the model values. Those go in a `GitpackTests` target in v0.2.
+Parser tests live in `Tests/ParserTests.swift`, run via `Tests/run-tests.sh` — a
+`swiftc` assert-runner over `Models.swift` + `Parsers.swift` (which must stay
+Foundation-only). No test target yet; add a real `GitpackTests` target when
+UI/async tests appear. Covered: porcelain v2 (headers, renames, unmerged,
+untracked, detached), diff-tree, log records, rev-list left/right.
