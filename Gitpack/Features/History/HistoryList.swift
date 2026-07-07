@@ -79,6 +79,9 @@ private struct HistoryListContent: View {
         }
         // Match the dot + spacing inset CommitRow now carries.
         .padding(.leading, 13)
+        // Fixed row height (see CommitRow) so NSTableView height estimation
+        // can't diverge from reality.
+        .frame(height: 41)
         .padding(.vertical, 2)
     }
 
@@ -114,7 +117,8 @@ private struct HistoryListContent: View {
             }
         }
         .buttonStyle(.plain)
-        .padding(.vertical, 6)
+        .frame(height: 41)
+        .padding(.vertical, 2)
     }
 }
 
@@ -155,6 +159,12 @@ private struct CommitRow: View {
                     .lineLimit(1)
             }
         }
+        // Every history row has an explicit fixed height. With automatic row
+        // heights, NSTableView's estimates for unmaterialized rows (24pt)
+        // diverge from measured two-line rows (45pt), and any selection change
+        // then scroll-to-rows into garbage offsets — sometimes past the end of
+        // the list, which blanks the whole pane.
+        .frame(height: 41)
         .padding(.vertical, 2)
     }
 

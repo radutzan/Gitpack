@@ -5,15 +5,20 @@ struct ContentView: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        NavigationSplitView {
+        // Plain HSplitView, not NavigationSplitView: the NavigationSplitView
+        // NSSplitView bridge intermittently laid out its columns to the full
+        // List content height (observed 13k–23k pt tall columns, autosaved and
+        // restored), pushing all pane content off-viewport — the window looked
+        // empty except for toolbar and dividers. Gitbox's layout is a fixed
+        // 3-pane; HSplitView models it without that machinery.
+        HSplitView {
             RepositorySidebar()
-                .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
-        } content: {
+                .frame(minWidth: 180, idealWidth: 220, maxWidth: 320, maxHeight: .infinity)
             HistoryList()
-                .navigationSplitViewColumnWidth(min: 320, ideal: 480)
-        } detail: {
+                .frame(minWidth: 320, idealWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1)
             DetailPane()
-                .navigationSplitViewColumnWidth(min: 320, ideal: 420)
+                .frame(minWidth: 320, idealWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle(windowTitle)
         .toolbar {
