@@ -1,0 +1,116 @@
+import Foundation
+
+// Assert-based parser tests, run via Tests/run-tests.sh.
+// Every fixture is byte-exact output of the corresponding git command.
+
+func check(_ condition: Bool, _ label: String) {
+    if condition {
+        print("ok — \(label)")
+    } else {
+        print("FAIL — \(label)")
+        exit(1)
+    }
+}
+
+@main
+struct ParserTests {
+    static func main() {
+        testPorcelainV2()
+        testDiffTree()
+        testLog()
+    }
+
+    // MARK: - PorcelainV2Parser
+
+    static func testPorcelainV2() {
+        // git status --porcelain=v2 --branch -z with: headers, a staged+unstaged
+        // modified file, a rename (type-2, origPath in the following NUL record),
+        // an untracked file, and an unmerged file.
+        let raw = [
+            "# branch.oid 1234567890abcdef1234567890abcdef12345678",
+            "# branch.head main",
+            "# branch.upstream origin/main",
+            "# branch.ab +2 -1",
+            "1 MM N... 100644 100644 100644 aaaa bbbb Sources/App file.swift",
+            "2 R. N... 100644 100644 100644 cccc dddd R100 new/path.swift",
+            "old/path.swift",
+            "? untracked file.txt",
+            "u UU N... 100644 100644 100644 100644 eeee ffff gggg conflicted.swift",
+            ""
+        ].joined(separator: "\u{00}")
+        let status = PorcelainV2Parser.parse(Data(raw.utf8))
+
+        check(status.branch == "main", "porcelain: branch head")
+        check(status.upstream == "origin/main", "porcelain: upstream")
+        check(status.ahead == 2 && status.behind == 1, "porcelain: ahead/behind")
+        check(status.entries.count == 4, "porcelain: entry count")
+
+        let modified = status.entries[0]
+        check(modified.path == "Sources/App file.swift", "porcelain: path with space survives -z")
+        check(modified.stagedStatus == .modified && modified.unstagedStatus == .modified, "porcelain: MM split")
+        check(modified.isPartiallyStaged, "porcelain: partial staging flag")
+
+        let renamed = status.entries[1]
+        check(renamed.path == "new/path.swift" && renamed.oldPath == "old/path.swift", "porcelain: rename paths")
+        check(renamed.stagedStatus == .renamed && renamed.unstagedStatus == nil, "porcelain: rename staged only")
+        check(renamed.isFullyStaged, "porcelain: rename fully staged")
+
+        let untracked = status.entries[2]
+        check(untracked.path == "untracked file.txt" && untracked.isUntracked, "porcelain: untracked")
+
+        let unmerged = status.entries[3]
+        check(unmerged.path == "conflicted.swift" && unmerged.stagedStatus == .unmerged, "porcelain: unmerged")
+
+        // Clean repo, detached HEAD: only headers.
+        let detachedRaw = "# branch.oid 1234\u{00}# branch.head (detached)\u{00}"
+        let detached = PorcelainV2Parser.parse(Data(detachedRaw.utf8))
+        check(detached.branch == nil, "porcelain: detached head is nil branch")
+        check(detached.isClean, "porcelain: clean status")
+    }
+
+    // MARK: - DiffTreeParser
+
+    static func testDiffTree() {
+        // git diff-tree --no-commit-id --name-status -r -z:
+        // plain entries are status\0path\0, renames are R<score>\0old\0new\0.
+        let raw = "M\u{00}a/b.swift\u{00}A\u{00}new.swift\u{00}R087\u{00}before.swift\u{00}after.swift\u{00}D\u{00}gone.swift\u{00}"
+        let changes = DiffTreeParser.parse(raw)
+
+        check(changes.count == 4, "diff-tree: entry count")
+        check(changes[0].status == .modified && changes[0].path == "a/b.swift", "diff-tree: modified")
+        check(changes[1].status == .added && changes[1].path == "new.swift", "diff-tree: added")
+        check(changes[2].status == .renamed && changes[2].path == "after.swift" && changes[2].oldPath == "before.swift", "diff-tree: rename")
+        check(changes[3].status == .deleted, "diff-tree: deleted")
+        check(DiffTreeParser.parse("").isEmpty, "diff-tree: empty input")
+    }
+
+    // MARK: - LogParser
+
+    static func testLog() {
+        let us = "\u{1F}", rs = "\u{1E}"
+        // Two records: a merge commit with empty body, and a normal commit with
+        // a multi-line body containing a US-free but newline-heavy message.
+        let raw =
+            "abc123\(us)abc\(us)Radu Dutzan\(us)radu@example.com\(us)2026-07-06T12:00:00+02:00\(us)p1 p2\(us)Merge branch 'x'\(us)\(rs)" +
+            "def456\(us)def\(us)Someone Else\(us)e@example.com\(us)2026-07-05T09:30:00Z\(us)p1\(us)Fix the thing\(us)Long body line one.\nLine two.\n\(rs)"
+        let commits = LogParser.parse(raw)
+
+        check(commits.count == 2, "log: record count")
+        let merge = commits[0]
+        check(merge.id == "abc123" && merge.shortID == "abc", "log: ids")
+        check(merge.isMerge && merge.parents == ["p1", "p2"], "log: merge parents")
+        check(merge.body.isEmpty, "log: empty body")
+        check(merge.subject == "Merge branch 'x'", "log: subject")
+
+        let normal = commits[1]
+        check(!normal.isMerge, "log: single parent")
+        check(normal.body == "Long body line one.\nLine two.", "log: multiline body trimmed")
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let comps = cal.dateComponents([.year, .month, .day, .hour], from: normal.date)
+        check(comps.year == 2026 && comps.month == 7 && comps.day == 5 && comps.hour == 9, "log: ISO date parsed")
+
+        check(LogParser.parse("").isEmpty, "log: empty input")
+        check(LogParser.parse("garbage without separators").isEmpty, "log: malformed record dropped")
+    }
+}
