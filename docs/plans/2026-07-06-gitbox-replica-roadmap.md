@@ -10,7 +10,8 @@ Primary reference: the open-sourced original at [github.com/oleganza/gitbox](htt
 - **In roadmap**: autofetch + dot markers + sidebar badges; live full-history search; full branch/history/stash/tag operations.
 - **Sidebar**: drag-reorder only for now. Groups: maybe later. Submodules: later.
 - **Auth**: keep delegating 100% to system git; background fetches that need interaction fail silently (matches Gitbox's suppressed background prompts). No askpass/Keychain UI.
-- **Parked** (not scheduled): undo/redo of git operations (⌘Z commit/pull/push), submodules, sidebar groups, auth prompt UI, 2011 visual skin, in-app diff / hunk staging (never in Gitbox 1.x either), history graph.
+- **Parked** (not scheduled): undo/redo of git operations (⌘Z commit/pull/push), submodules, sidebar groups, auth prompt UI.
+- **Out of scope for this project** (not parked — excluded): 2011 visual skin, in-app diff / hunk staging (never in Gitbox 1.x either), history graph.
 
 ## Baseline (done, v0.1)
 
@@ -40,7 +41,17 @@ Gitbox's identity: "see all your repositories at a glance." Requires an architec
 - New remote commits appear live with blue dots when the repo is selected.
 - Sidebar drag-reorder.
 
-## Milestone 3 — Full branch, tag, stash, and history operations
+## Milestone 3 — Live history search
+
+Gitbox's signature feature. ⌘F / toolbar field streams `git log -p` and filters live — no index.
+
+- Matches commit metadata (author, SHA, date), file paths, and **added/removed diff lines**; space-separated tokens AND together; quoted phrases match exact case.
+- Yellow highlight of matched substrings in history rows, file lists, and message text.
+- Thin results bar atop the history list: live count ("152 commits") + progress spinner; Esc cancels the stream.
+- Show File History (⌘D): filter history to commits touching the selected file (same pipeline, path filter).
+- Implementation: incremental `git log -p -z`-style streaming parse off-main-actor, batched UI updates; cancellation via process kill. `Documents/Search.txt` in the Gitbox repo is the spec — follow it.
+
+## Milestone 4 — Full branch, tag, stash, and history operations
 
 Breadth. Toolbar branch popup grows Gitbox's full menu; the commit context menu becomes the power-user surface. Advanced/destructive stays in menus and modifiers — the toolbar keeps its four controls.
 
@@ -52,16 +63,6 @@ Breadth. Toolbar branch popup grows Gitbox's full menu; the commit context menu 
 - Rebase conflict state: stage pane shows status + **Cancel / Skip / Continue Rebase** buttons (Gitbox's only "mode"). Merge conflicts stay minimal: conflicted files marked, resolve via external mergetool.
 - Repo Settings sheet: Summary, Branches and Tags, Remotes tabs (add/remove remotes; delete local/remote branches).
 - File ops on stage rows: Ignore File…, Revert File…, Delete File….
-
-## Milestone 4 — Live history search
-
-Gitbox's signature feature. ⌘F / toolbar field streams `git log -p` and filters live — no index.
-
-- Matches commit metadata (author, SHA, date), file paths, and **added/removed diff lines**; space-separated tokens AND together; quoted phrases match exact case.
-- Yellow highlight of matched substrings in history rows, file lists, and message text.
-- Thin results bar atop the history list: live count ("152 commits") + progress spinner; Esc cancels the stream.
-- Show File History (⌘D): filter history to commits touching the selected file (same pipeline, path filter).
-- Implementation: incremental `git log -p -z`-style streaming parse off-main-actor, batched UI updates; cancellation via process kill. `Documents/Search.txt` in the Gitbox repo is the spec — follow it.
 
 ## Milestone 5 — Detail pane & app-shell polish
 
@@ -78,10 +79,10 @@ Gitbox's signature feature. ⌘F / toolbar field streams `git log -p` and filter
 
 ## Ordering rationale
 
-M1 before M2 because badges/dots are defined by the comparison model. M3 is wide but each op is shallow (one `GitService` method + one menu item each, mostly). M4 is self-contained and touches only history + a streaming parser. M5 is independent garnish and can be interleaved anywhere after M1. Each milestone ships a usable app; nothing blocks on a later milestone.
+M1 before M2 because badges/dots are defined by the comparison model. M3 (search) is self-contained and touches only history + a streaming parser. M4 is wide but each op is shallow (one `GitService` method + one menu item each, mostly). M5 is independent garnish and can be interleaved anywhere after M1. Each milestone ships a usable app; nothing blocks on a later milestone.
 
 ## Standing technical notes
 
 - Every new operation goes through the `GitService` protocol (CLI backend, NUL-terminated parsing — see `ARCHITECTURE.md`).
 - Parser tests (promised since v0.1) should land with M1 — the rev-list/ref parsing added there is exactly the fragile kind.
-- SwiftUI `List` performance with dots/labels/highlights on 10k+ rows: re-evaluate `NSTableView` interop at M4 (search highlighting) if scrolling degrades.
+- SwiftUI `List` performance with dots/labels/highlights on 10k+ rows: re-evaluate `NSTableView` interop at M3 (search highlighting) if scrolling degrades.
