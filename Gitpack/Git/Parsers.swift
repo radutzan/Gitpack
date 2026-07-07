@@ -35,6 +35,25 @@ nonisolated enum LogParser {
     }
 }
 
+// MARK: - rev-list --left-right parser
+
+nonisolated enum RevListParser {
+    /// Parses `git rev-list --left-right A...B`: one SHA per line, prefixed
+    /// `<` (reachable only from A) or `>` (reachable only from B).
+    static func parseLeftRight(_ text: String) -> (left: Set<String>, right: Set<String>) {
+        var left = Set<String>()
+        var right = Set<String>()
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            if line.hasPrefix("<") {
+                left.insert(String(line.dropFirst()))
+            } else if line.hasPrefix(">") {
+                right.insert(String(line.dropFirst()))
+            }
+        }
+        return (left, right)
+    }
+}
+
 // MARK: - Porcelain v2 parser
 
 nonisolated enum PorcelainV2Parser {

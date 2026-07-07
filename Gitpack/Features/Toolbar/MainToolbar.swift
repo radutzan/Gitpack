@@ -138,7 +138,7 @@ private struct PushButton: View {
         isWorking = true
         defer { isWorking = false }
         do {
-            try await appState.git.push(at: vm.repository.url)
+            try await appState.git.push(remote: nil, refspec: nil, force: false, at: vm.repository.url)
             await vm.refreshAll(using: appState.git)
         } catch let error as GitError {
             vm.lastError = error.description

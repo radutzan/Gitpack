@@ -87,7 +87,7 @@ actor CLIGitService: GitService {
 
     // MARK: - Log
 
-    func log(at url: URL, limit: Int, skip: Int, branch: String?) async throws -> [Commit] {
+    func log(at url: URL, limit: Int, skip: Int, refs: [String]) async throws -> [Commit] {
         // %x1f = US (unit separator), %x1e = RS (record separator)
         let format = "%H%x1f%h%x1f%an%x1f%ae%x1f%aI%x1f%P%x1f%s%x1f%b%x1e"
         var args: [String] = [
@@ -96,11 +96,17 @@ actor CLIGitService: GitService {
             "--skip=\(skip)",
             "--format=\(format)"
         ]
-        if let branch {
-            args.append(branch)
-        }
+        args.append(contentsOf: refs)
         let result = try await runGit(args, at: url)
         return LogParser.parse(result.stdoutString)
+    }
+
+    func divergence(current: String, other: String, at url: URL) async throws -> Divergence {
+        let result = try await runGit([
+            "rev-list", "--left-right", "\(current)...\(other)"
+        ], at: url)
+        let (left, right) = RevListParser.parseLeftRight(result.stdoutString)
+        return Divergence(otherRef: other, unpushed: left, unmerged: right)
     }
 
     func filesInCommit(at url: URL, sha: String) async throws -> [CommitFileChange] {
@@ -158,8 +164,22 @@ actor CLIGitService: GitService {
         _ = try await runGit(["pull"], at: url)
     }
 
-    func push(at url: URL) async throws {
-        _ = try await runGit(["push"], at: url)
+    func pullRebase(at url: URL) async throws {
+        _ = try await runGit(["pull", "--rebase"], at: url)
+    }
+
+    func push(remote: String?, refspec: String?, force: Bool, at url: URL) async throws {
+        var args = ["push"]
+        if force { args.append("--force") }
+        if let remote, let refspec {
+            args.append(remote)
+            args.append(refspec)
+        }
+        _ = try await runGit(args, at: url)
+    }
+
+    func merge(branch: String, at url: URL) async throws {
+        _ = try await runGit(["merge", branch], at: url)
     }
 
     func checkout(branch: String, at url: URL) async throws {

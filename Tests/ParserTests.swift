@@ -18,6 +18,22 @@ struct ParserTests {
         testPorcelainV2()
         testDiffTree()
         testLog()
+        testRevList()
+    }
+
+    // MARK: - RevListParser
+
+    static func testRevList() {
+        let raw = "<aaa111\n>bbb222\n<ccc333\n>ddd444\n"
+        let (left, right) = RevListParser.parseLeftRight(raw)
+        check(left == ["aaa111", "ccc333"], "rev-list: left set")
+        check(right == ["bbb222", "ddd444"], "rev-list: right set")
+
+        let (l2, r2) = RevListParser.parseLeftRight("")
+        check(l2.isEmpty && r2.isEmpty, "rev-list: empty input")
+
+        let (l3, r3) = RevListParser.parseLeftRight("<only\n")
+        check(l3 == ["only"] && r3.isEmpty, "rev-list: one-sided")
     }
 
     // MARK: - PorcelainV2Parser

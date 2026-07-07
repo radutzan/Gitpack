@@ -94,6 +94,16 @@ struct WorkingCopyStatus: Sendable {
     }
 }
 
+/// The commit-set difference between the current branch and its "other branch"
+/// (Gitbox's comparison target — a remote tracking branch or another local branch).
+struct Divergence: Hashable, Sendable {
+    let otherRef: String
+    /// SHAs on the current branch but not on the other (green dots).
+    let unpushed: Set<String>
+    /// SHAs on the other branch but not on the current (blue dots).
+    let unmerged: Set<String>
+}
+
 struct Branch: Hashable, Sendable {
     let name: String
     let upstream: String?
