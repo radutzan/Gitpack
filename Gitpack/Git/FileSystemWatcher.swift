@@ -30,6 +30,13 @@ nonisolated enum GitChangeClassifier {
             }
             // A path inside the repository's `.git` directory.
             let suffix = path[gitRange.upperBound...]
+            // Transient lock files are noise, and must be excluded BEFORE the
+            // refs test: `git fetch` touches refs/remotes/<remote>/HEAD.lock on
+            // every run even when nothing changed. Real ref updates rename the
+            // lock onto the final path, which fires its own event.
+            if suffix.hasSuffix(".lock") {
+                continue
+            }
             if suffix.hasPrefix("refs/")
                 || suffix.hasPrefix("logs/")
                 || suffix == "HEAD"

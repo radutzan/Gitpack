@@ -75,7 +75,6 @@ final class RepositoryViewModel {
     var isMissing = false
 
     private let pageSize = 200
-    private var loadedPages = 0
     private var hasMoreHistory = true
 
     init(repository: Repository) {
@@ -106,25 +105,33 @@ final class RepositoryViewModel {
             let remoteBranches = try await remoteBranchesTask
             let remotes = try await remotesTask
 
+            // Only assign what actually changed. refreshAll runs on every app
+            // activation and after every autofetch; unconditional assignment —
+            // especially rebuilding `commits` — reloads the NSTableView mid-
+            // click, blanking the panes and dropping selection.
             self.status = status
-            self.branches = branches
-            self.remoteBranches = remoteBranches
-            self.remotes = remotes
+            if branches != self.branches { self.branches = branches }
+            if remoteBranches != self.remoteBranches { self.remoteBranches = remoteBranches }
+            if remotes != self.remotes { self.remotes = remotes }
             self.currentBranch = status.branch ?? branches.first(where: \.isCurrent)?.name
             onStatusChanged?(status)
 
             // Divergence vs the "other branch" (upstream config, local or remote).
-            if let current = currentBranch, let other = otherBranch, other != current {
-                divergence = try? await git.divergence(current: current, other: other, at: url)
+            let divergence: Divergence? = if let current = currentBranch, let other = otherBranch, other != current {
+                try? await git.divergence(current: current, other: other, at: url)
             } else {
-                divergence = nil
+                nil
             }
+            if divergence != self.divergence { self.divergence = divergence }
 
-            // Fresh history.
-            loadedPages = 0
-            hasMoreHistory = true
-            commits = []
-            await loadMoreHistory(using: git)
+            // Fresh history, rebuilt off-screen and swapped in only if it
+            // differs. Refetches the full loaded depth so pagination survives.
+            let limit = max(commits.count, pageSize)
+            let fresh = try await git.log(at: url, limit: limit, skip: 0, refs: historyRefs)
+            if fresh != commits {
+                commits = fresh
+                hasMoreHistory = fresh.count == limit
+            }
 
             // Default selection: working copy if dirty, else first commit.
             if selection == nil {
@@ -251,11 +258,10 @@ final class RepositoryViewModel {
             let page = try await git.log(
                 at: url,
                 limit: pageSize,
-                skip: loadedPages * pageSize,
+                skip: commits.count,
                 refs: historyRefs
             )
             commits.append(contentsOf: page)
-            loadedPages += 1
             if page.count < pageSize {
                 hasMoreHistory = false
             }

@@ -19,6 +19,40 @@ struct ParserTests {
         testDiffTree()
         testLog()
         testRevList()
+        testChangeClassifier()
+    }
+
+    // MARK: - GitChangeClassifier
+
+    static func testChangeClassifier() {
+        func kind(_ paths: String...) -> WatchRefreshKind {
+            GitChangeClassifier.refreshKind(for: paths)
+        }
+        let repo = "/tmp/repo/.git/"
+
+        // Transient lock files are noise — git writes `X.lock` then renames to
+        // `X`, so a real ref update still fires an event for the final path.
+        // `git fetch` touches refs/remotes/<remote>/HEAD.lock on EVERY run even
+        // when nothing changed; classifying that as .full caused constant
+        // destructive history reloads (the disappearing-content bug).
+        check(kind(repo + "refs/remotes/origin/HEAD.lock") == .none, "classifier: ref lock is noise")
+        check(kind(repo + "HEAD.lock") == .none, "classifier: HEAD lock is noise")
+        check(kind(repo + "index.lock") == .none, "classifier: index lock is noise")
+        check(kind(repo + "objects/maintenance.lock") == .none, "classifier: maintenance lock is noise")
+
+        // Real changes still classify correctly.
+        check(kind(repo + "refs/remotes/origin/main") == .full, "classifier: remote ref moved is full")
+        check(kind(repo + "refs/heads/main") == .full, "classifier: local ref moved is full")
+        check(kind(repo + "HEAD") == .full, "classifier: HEAD is full")
+        check(kind(repo + "packed-refs") == .full, "classifier: packed-refs is full")
+        check(kind(repo + "index") == .status, "classifier: index is status")
+        check(kind("/tmp/repo/Sources/File.swift") == .status, "classifier: working tree is status")
+        check(kind(repo + "FETCH_HEAD") == .none, "classifier: FETCH_HEAD is noise")
+        check(kind(repo + "objects/ab/cdef") == .none, "classifier: loose object is noise")
+
+        // Batches take the coarsest.
+        check(kind(repo + "index.lock", repo + "refs/heads/main") == .full, "classifier: batch coarsest wins")
+        check(kind(repo + "index.lock", "/tmp/repo/a.txt") == .status, "classifier: lock + tree is status")
     }
 
     // MARK: - RevListParser

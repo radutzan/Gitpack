@@ -5,5 +5,6 @@
 set -e
 cd "$(dirname "$0")"
 swiftc -parse-as-library -o /tmp/gitpack-parser-tests \
-  ../Gitpack/Git/Models.swift ../Gitpack/Git/Parsers.swift ParserTests.swift
+  ../Gitpack/Git/Models.swift ../Gitpack/Git/Parsers.swift \
+  ../Gitpack/Git/FileSystemWatcher.swift ParserTests.swift
 /tmp/gitpack-parser-tests && echo "ALL TESTS PASSED"
