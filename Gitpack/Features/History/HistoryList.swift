@@ -25,7 +25,7 @@ private struct HistoryListContent: View {
             workingCopyRow
                 .tag(HistoryItem.workingCopy)
             ForEach(vm.commits) { commit in
-                CommitRow(commit: commit)
+                CommitRow(commit: commit, marker: vm.marker(for: commit))
                     .tag(HistoryItem.commit(commit.id))
             }
             if vm.commits.count >= 200 {
@@ -65,6 +65,8 @@ private struct HistoryListContent: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
+        // Match the dot + spacing inset CommitRow now carries.
+        .padding(.leading, 13)
         .padding(.vertical, 2)
     }
 
@@ -106,30 +108,58 @@ private struct HistoryListContent: View {
 
 private struct CommitRow: View {
     let commit: Commit
+    let marker: CommitMarker
+
+    // Unmerged (other-branch-only) commits render italic and faded, like
+    // Gitbox; merge commits keep their existing de-emphasis.
+    private var isDeemphasized: Bool { commit.isMerge || marker == .unmerged }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(commit.authorName)
+        HStack(alignment: .top, spacing: 6) {
+            Circle()
+                .fill(markerColor)
+                .frame(width: 7, height: 7)
+                .padding(.top, 5)
+                .help(markerHelp)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(commit.authorName)
+                        .font(.body)
+                        .fontWeight(isDeemphasized ? .regular : .semibold)
+                        .italic(isDeemphasized)
+                        .foregroundStyle(isDeemphasized ? .secondary : .primary)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(commit.date, format: DateFormat.commitTimestamp)
+                        .font(.body)
+                        .foregroundStyle(Color.accentColor)
+                        .italic(isDeemphasized)
+                        .opacity(isDeemphasized ? 0.7 : 1)
+                }
+                Text(commit.subject.isEmpty ? " " : commit.subject)
                     .font(.body)
-                    .fontWeight(commit.isMerge ? .regular : .semibold)
-                    .italic(commit.isMerge)
-                    .foregroundStyle(commit.isMerge ? .secondary : .primary)
+                    .italic(isDeemphasized)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Spacer()
-                Text(commit.date, format: DateFormat.commitTimestamp)
-                    .font(.body)
-                    .foregroundStyle(Color.accentColor)
-                    .italic(commit.isMerge)
-                    .opacity(commit.isMerge ? 0.7 : 1)
             }
-            Text(commit.subject.isEmpty ? " " : commit.subject)
-                .font(.body)
-                .italic(commit.isMerge)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
         }
         .padding(.vertical, 2)
+    }
+
+    private var markerColor: Color {
+        switch marker {
+        case .none: .clear
+        case .unpushed: .green
+        case .unmerged: .blue
+        }
+    }
+
+    private var markerHelp: String {
+        switch marker {
+        case .none: ""
+        case .unpushed: "Not yet pushed to the other branch"
+        case .unmerged: "On the other branch, not yet merged"
+        }
     }
 }
 
