@@ -19,6 +19,13 @@ struct WorkingCopyDetail: View {
             fileList
         }
         .animation(.easeInOut(duration: 0.18), value: composerExpanded)
+        // Gitbox trick: typing a commit message kicks off a fetch, so you can
+        // pull before committing if the remote moved.
+        .onChange(of: commitMessage) { _, message in
+            if !message.isEmpty {
+                appState.opportunisticFetch()
+            }
+        }
     }
 
     // MARK: - Composer
