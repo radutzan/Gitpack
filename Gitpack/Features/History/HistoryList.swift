@@ -33,6 +33,18 @@ private struct HistoryListContent: View {
             }
         }
         .listStyle(.inset)
+        // Gitbox single-key shortcuts; scoped to list focus so text fields are safe.
+        .onKeyPress(KeyEquivalent("u")) {
+            guard vm.otherBranch != nil, !vm.isSyncing else { return .ignored }
+            let action: SyncAction = vm.otherBranchIsLocal ? .merge : .pull
+            Task { await vm.performSync(action, using: appState.git) }
+            return .handled
+        }
+        .onKeyPress(KeyEquivalent("p")) {
+            guard vm.otherBranch != nil, !vm.otherBranchIsLocal, !vm.isSyncing else { return .ignored }
+            Task { await vm.performSync(.push, using: appState.git) }
+            return .handled
+        }
         .refreshable {
             await vm.refreshAll(using: appState.git)
         }

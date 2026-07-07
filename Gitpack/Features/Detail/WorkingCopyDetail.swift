@@ -103,6 +103,30 @@ struct WorkingCopyDetail: View {
             }
         }
         .listStyle(.plain)
+        // Gitbox single-key shortcuts; scoped to list focus so text fields are safe.
+        .onKeyPress(KeyEquivalent("s")) {
+            guard !selection.isEmpty else { return .ignored }
+            Task { await toggleStaging(Array(selection)) }
+            return .handled
+        }
+        .onKeyPress(KeyEquivalent("d")) {
+            guard selection.count == 1, let path = selection.first else { return .ignored }
+            Task { await openDiff(path) }
+            return .handled
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .stageAllRequested)) { _ in
+            let unstaged = entries.filter { $0.unstagedStatus != nil }.map(\.path)
+            if !unstaged.isEmpty {
+                Task { await stage(unstaged) }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .commitRequested)) { _ in
+            if canCommit {
+                Task { await performCommit() }
+            } else {
+                composerFocused = true
+            }
+        }
         .contextMenu(forSelectionType: String.self) { selectedPaths in
             menuItems(for: selectedPaths)
         } primaryAction: { selectedPaths in
