@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct MainToolbar: ToolbarContent {
     @Environment(AppState.self) private var appState
@@ -23,17 +24,16 @@ struct MainToolbar: ToolbarContent {
             .disabled(true)
         }
 
-        // Center: branch picker, pull, push, upstream picker. macOS lays out a
-        // single principal item centered (and gives it precedence over the
+        // Center: branch picker, sync controls, other-branch picker. macOS lays
+        // out a single principal item centered (and gives it precedence over the
         // window title); multiple sibling `.principal` items fragment and drop
         // out instead. Keep them as one principal item holding an HStack so the
         // whole cluster renders together, centered.
         ToolbarItem(placement: .principal) {
             HStack(spacing: 8) {
                 BranchPicker()
-                PullButton()
-                PushButton()
-                UpstreamPicker()
+                SyncControls()
+                OtherBranchPicker()
             }
         }
     }
@@ -90,114 +90,150 @@ private struct BranchPicker: View {
     }
 }
 
-private struct PullButton: View {
+/// Gitbox's pull/push pair. Labels morph live with held modifiers
+/// (⌥ → Fetch, ⇧⌘ → Rebase / Force Push), and the pair collapses to a single
+/// Merge button when the "other branch" is a local branch.
+private struct SyncControls: View {
     @Environment(AppState.self) private var appState
-    @State private var isWorking = false
+    @State private var modifiers: NSEvent.ModifierFlags = []
+    @State private var monitor: Any?
 
     var body: some View {
-        Button {
-            Task { await pull() }
-        } label: {
-            Label("Pull", systemImage: "arrow.down")
+        HStack(spacing: 4) {
+            if let vm = appState.selectedViewModel, vm.otherBranch != nil, vm.otherBranchIsLocal {
+                Button {
+                    run(.merge, vm: vm)
+                } label: {
+                    Label("Merge", systemImage: "arrow.triangle.merge")
+                }
+                .help("Merge \(vm.otherBranch ?? "") into \(vm.currentBranch ?? "current branch")")
+                .disabled(vm.isSyncing)
+            } else {
+                let vm = appState.selectedViewModel
+                Button {
+                    if let vm { run(downAction, vm: vm) }
+                } label: {
+                    Label(downLabel, systemImage: downIcon)
+                }
+                .help("\(downLabel) from \(vm?.otherBranch ?? "the other branch")")
+                .disabled(vm == nil || vm?.otherBranch == nil || vm?.isSyncing == true)
+
+                Button {
+                    if let vm { run(upAction, vm: vm) }
+                } label: {
+                    Label(upLabel, systemImage: "arrow.up")
+                }
+                .help("\(upLabel) to \(vm?.otherBranch ?? "the other branch")")
+                .disabled(vm == nil || vm?.otherBranch == nil || vm?.isSyncing == true)
+            }
         }
-        .help("Pull from upstream")
-        .disabled(appState.selectedViewModel == nil || isWorking)
+        .onAppear {
+            // NSEvent monitor rather than .onModifierKeysChanged: fires regardless
+            // of which pane has focus, which is what a toolbar affordance wants.
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
+                modifiers = event.modifierFlags
+                return event
+            }
+        }
+        .onDisappear {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
     }
 
-    private func pull() async {
-        guard let vm = appState.selectedViewModel else { return }
-        isWorking = true
-        defer { isWorking = false }
-        do {
-            try await appState.git.pull(at: vm.repository.url)
-            await vm.refreshAll(using: appState.git)
-        } catch let error as GitError {
-            vm.lastError = error.description
-        } catch {
-            vm.lastError = error.localizedDescription
+    private var downAction: SyncAction {
+        if modifiers.contains(.option) { return .fetch }
+        if modifiers.contains(.command) && modifiers.contains(.shift) { return .rebase }
+        return .pull
+    }
+
+    private var downLabel: String {
+        switch downAction {
+        case .fetch: "Fetch"
+        case .rebase: "Rebase"
+        default: "Pull"
         }
+    }
+
+    private var downIcon: String {
+        downAction == .fetch ? "arrow.down.circle.dotted" : "arrow.down"
+    }
+
+    private var upAction: SyncAction {
+        modifiers.contains(.command) && modifiers.contains(.shift) ? .forcePush : .push
+    }
+
+    private var upLabel: String {
+        upAction == .forcePush ? "Force Push" : "Push"
+    }
+
+    private func run(_ action: SyncAction, vm: RepositoryViewModel) {
+        Task { await vm.performSync(action, using: appState.git) }
     }
 }
 
-private struct PushButton: View {
-    @Environment(AppState.self) private var appState
-    @State private var isWorking = false
-
-    var body: some View {
-        Button {
-            Task { await push() }
-        } label: {
-            Label("Push", systemImage: "arrow.up")
-        }
-        .help("Push to upstream")
-        .disabled(appState.selectedViewModel == nil || isWorking)
-    }
-
-    private func push() async {
-        guard let vm = appState.selectedViewModel else { return }
-        isWorking = true
-        defer { isWorking = false }
-        do {
-            try await appState.git.push(remote: nil, refspec: nil, force: false, at: vm.repository.url)
-            await vm.refreshAll(using: appState.git)
-        } catch let error as GitError {
-            vm.lastError = error.description
-        } catch {
-            vm.lastError = error.localizedDescription
-        }
-    }
-}
-
-private struct UpstreamPicker: View {
+/// Gitbox's "other branch" popup: the branch the current one is compared and
+/// synced against. Remote branches (grouped per remote when there are several)
+/// plus other local branches. Stored as upstream config.
+private struct OtherBranchPicker: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
         if let vm = appState.selectedViewModel {
-            let current = currentUpstream(vm: vm)
             Menu {
-                ForEach(vm.remoteBranches, id: \.self) { remote in
-                    Button {
-                        Task { await setUpstream(remote, vm: vm) }
-                    } label: {
-                        HStack {
-                            if remote == current {
-                                Image(systemName: "checkmark")
+                let locals = vm.branches.filter { !$0.isCurrent }
+                if !locals.isEmpty {
+                    Section("Local Branches") {
+                        ForEach(locals, id: \.name) { branch in
+                            selectionButton(branch.name, vm: vm)
+                        }
+                    }
+                }
+                if vm.remotes.count > 1 {
+                    ForEach(vm.remotes, id: \.name) { remote in
+                        Menu(remote.name) {
+                            ForEach(branches(of: remote.name, vm: vm), id: \.self) { name in
+                                selectionButton(name, vm: vm)
                             }
-                            Text(remote)
+                        }
+                    }
+                } else if !vm.remoteBranches.isEmpty {
+                    Section("Remote Branches") {
+                        ForEach(vm.remoteBranches, id: \.self) { name in
+                            selectionButton(name, vm: vm)
                         }
                     }
                 }
             } label: {
-                Label(current ?? "No Upstream", systemImage: "point.3.connected.trianglepath.dotted")
+                Label(vm.otherBranch ?? "No Branch", systemImage: "point.3.connected.trianglepath.dotted")
                     .labelStyle(.titleAndIcon)
                     .lineLimit(1)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            // No remotes means there's nothing to set an upstream to.
-            .disabled(vm.remoteBranches.isEmpty)
-            .help("Upstream Branch")
+            .disabled(vm.remoteBranches.isEmpty && vm.branches.count <= 1)
+            .help("Other Branch — what the current branch is compared and synced with")
         } else {
-            Label("No Upstream", systemImage: "point.3.connected.trianglepath.dotted")
+            Label("No Branch", systemImage: "point.3.connected.trianglepath.dotted")
                 .labelStyle(.titleAndIcon)
                 .foregroundStyle(.secondary)
         }
     }
 
-    private func currentUpstream(vm: RepositoryViewModel) -> String? {
-        if let value = vm.status?.upstream { return value }
-        return vm.branches.first(where: { $0.name == vm.currentBranch })?.upstream
+    private func branches(of remote: String, vm: RepositoryViewModel) -> [String] {
+        vm.remoteBranches.filter { $0.hasPrefix(remote + "/") }
     }
 
-    private func setUpstream(_ upstream: String, vm: RepositoryViewModel) async {
-        guard let branch = vm.currentBranch else { return }
-        do {
-            try await appState.git.setUpstream(branch: branch, upstream: upstream, at: vm.repository.url)
-            await vm.refreshAll(using: appState.git)
-        } catch let error as GitError {
-            vm.lastError = error.description
-        } catch {
-            vm.lastError = error.localizedDescription
+    private func selectionButton(_ name: String, vm: RepositoryViewModel) -> some View {
+        Button {
+            Task { await vm.setOtherBranch(name, using: appState.git) }
+        } label: {
+            HStack {
+                if name == vm.otherBranch {
+                    Image(systemName: "checkmark")
+                }
+                Text(name)
+            }
         }
     }
 }

@@ -12,6 +12,15 @@ enum CommitMarker {
     case unmerged  // on the other branch, not on the current one (blue)
 }
 
+enum SyncAction {
+    case pull
+    case fetch
+    case rebase
+    case merge
+    case push
+    case forcePush
+}
+
 /// Per-repository view state. Cached so switching back to a repo is fast.
 @Observable
 @MainActor
@@ -27,6 +36,7 @@ final class RepositoryViewModel {
     var selection: HistoryItem?
     var commitFiles: [String: [CommitFileChange]] = [:]
     var isLoading = false
+    var isSyncing = false
     var lastError: String?
     var isMissing = false
 
@@ -135,6 +145,51 @@ final class RepositoryViewModel {
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    /// Runs a sync operation (toolbar buttons and menu items both route here)
+    /// and refreshes. Errors land in `lastError`.
+    func performSync(_ action: SyncAction, using git: GitService) async {
+        guard !isSyncing else { return }
+        isSyncing = true
+        defer { isSyncing = false }
+        do {
+            switch action {
+            case .pull:
+                try await git.pull(at: repository.url)
+            case .fetch:
+                try await git.fetch(at: repository.url)
+            case .rebase:
+                try await git.pullRebase(at: repository.url)
+            case .merge:
+                guard let other = otherBranch else { return }
+                try await git.merge(branch: other, at: repository.url)
+            case .push, .forcePush:
+                let (remote, refspec) = pushTarget
+                try await git.push(
+                    remote: remote, refspec: refspec,
+                    force: action == .forcePush, at: repository.url
+                )
+            }
+            await refreshAll(using: git)
+        } catch let error as GitError {
+            lastError = error.description
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    /// Explicit push destination derived from the other branch, Gitbox-style
+    /// (`git push <remote> <current>:<remoteBranch>`), so pushing works even
+    /// when local and remote branch names differ. Falls back to plain `git push`.
+    private var pushTarget: (remote: String?, refspec: String?) {
+        guard let current = currentBranch, let other = otherBranch, !otherBranchIsLocal else {
+            return (nil, nil)
+        }
+        let candidates = remotes.map(\.name).filter { other.hasPrefix($0 + "/") }
+        guard let remote = candidates.max(by: { $0.count < $1.count }) else { return (nil, nil) }
+        let branch = String(other.dropFirst(remote.count + 1))
+        return (remote, "\(current):\(branch)")
     }
 
     func marker(for commit: Commit) -> CommitMarker {
