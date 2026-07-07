@@ -21,6 +21,37 @@ enum SyncAction {
     case forcePush
 }
 
+/// Lightweight always-current state for every sidebar repo (the full
+/// `RepositoryViewModel` is only loaded for the selected one). Fed by one
+/// `git status --porcelain=v2` call per repo — `branch.ab` supplies
+/// unpushed/unmerged and the entry list supplies the stage count.
+@Observable
+@MainActor
+final class RepoBackgroundState {
+    var unpushed = 0
+    var unmerged = 0
+    var stageChanges = 0
+    var isFetching = false
+    var consecutiveFailures = 0
+    var lastFetchAttempt: Date?
+
+    /// Gitbox's sidebar badge: unpushed + unmerged commits + pending stage changes.
+    var badge: Int { unpushed + unmerged + stageChanges }
+
+    var nextFetchAttempt: Date? {
+        guard let lastFetchAttempt, consecutiveFailures > 0 else { return nil }
+        // ponytail: exponential backoff 2min→30min cap; no jitter, no per-remote state
+        let backoff = min(60.0 * pow(2, Double(consecutiveFailures)), 1800)
+        return lastFetchAttempt.addingTimeInterval(backoff)
+    }
+
+    func apply(_ status: WorkingCopyStatus) {
+        stageChanges = status.entries.count
+        unpushed = status.ahead
+        unmerged = status.behind
+    }
+}
+
 /// Per-repository view state. Cached so switching back to a repo is fast.
 @Observable
 @MainActor
@@ -37,6 +68,9 @@ final class RepositoryViewModel {
     var commitFiles: [String: [CommitFileChange]] = [:]
     var isLoading = false
     var isSyncing = false
+    /// Set by AppState; lets every status refresh also keep the sidebar
+    /// badge (RepoBackgroundState) current for this repo.
+    var onStatusChanged: ((WorkingCopyStatus) -> Void)?
     var lastError: String?
     var isMissing = false
 
@@ -77,6 +111,7 @@ final class RepositoryViewModel {
             self.remoteBranches = remoteBranches
             self.remotes = remotes
             self.currentBranch = status.branch ?? branches.first(where: \.isCurrent)?.name
+            onStatusChanged?(status)
 
             // Divergence vs the "other branch" (upstream config, local or remote).
             if let current = currentBranch, let other = otherBranch, other != current {
@@ -112,6 +147,7 @@ final class RepositoryViewModel {
         do {
             let status = try await git.workingCopyStatus(at: url)
             self.status = status
+            onStatusChanged?(status)
             if let currentSelection = selection, case .workingCopy = currentSelection, status.isClean {
                 // Drop to first commit if WC went clean.
                 if let first = commits.first {
@@ -248,6 +284,8 @@ final class AppState {
 
     var selectedRepositoryID: UUID?
     private var viewModels: [UUID: RepositoryViewModel] = [:]
+    private var backgroundStates: [UUID: RepoBackgroundState] = [:]
+    private var autofetchTask: Task<Void, Never>?
 
     // Filesystem watching: keeps the selected repo's view in sync with on-disk
     // reality without manual refreshes. Only the selected repo is watched.
@@ -276,8 +314,18 @@ final class AppState {
     func viewModel(for repository: Repository) -> RepositoryViewModel {
         if let existing = viewModels[repository.id] { return existing }
         let vm = RepositoryViewModel(repository: repository)
+        vm.onStatusChanged = { [weak self, id = repository.id] status in
+            self?.backgroundState(for: id).apply(status)
+        }
         viewModels[repository.id] = vm
         return vm
+    }
+
+    func backgroundState(for id: UUID) -> RepoBackgroundState {
+        if let existing = backgroundStates[id] { return existing }
+        let state = RepoBackgroundState()
+        backgroundStates[id] = state
+        return state
     }
 
     var selectedViewModel: RepositoryViewModel? {
@@ -306,9 +354,74 @@ final class AppState {
     func removeRepository(_ repo: Repository) {
         store.remove(repo)
         viewModels.removeValue(forKey: repo.id)
+        backgroundStates.removeValue(forKey: repo.id)
         if selectedRepositoryID == repo.id {
             selectedRepositoryID = store.repositories.first?.id
         }
+    }
+
+    // MARK: - Autofetch
+
+    /// Background fetch across all sidebar repos, Gitbox-style: the app is a
+    /// live view of every repository, not just the selected one. Errors are
+    /// silent (badge just doesn't move) with per-repo exponential backoff.
+    func startAutofetch() {
+        guard autofetchTask == nil else { return }
+        autofetchTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.autofetchCycle()
+                // ponytail: fixed 60s cycle + 2s stagger; make it adaptive if it's ever too chatty
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+    }
+
+    private func autofetchCycle() async {
+        for repo in store.repositories {
+            if Task.isCancelled { return }
+            guard FileManager.default.fileExists(atPath: repo.url.path) else { continue }
+            let state = backgroundState(for: repo.id)
+            if state.isFetching { continue }
+            if let next = state.nextFetchAttempt, Date() < next {
+                // Cooling down after failures — still refresh the local counts.
+                await refreshBackgroundState(for: repo)
+                continue
+            }
+            await fetchQuietly(repo, state: state)
+            try? await Task.sleep(for: .seconds(2))
+        }
+    }
+
+    private func fetchQuietly(_ repo: Repository, state: RepoBackgroundState) async {
+        state.isFetching = true
+        state.lastFetchAttempt = Date()
+        do {
+            try await git.fetch(at: repo.url)
+            state.consecutiveFailures = 0
+        } catch {
+            state.consecutiveFailures += 1
+        }
+        state.isFetching = false
+        await refreshBackgroundState(for: repo)
+    }
+
+    /// One `git status` call: refreshes badge counts without loading the repo.
+    func refreshBackgroundState(for repo: Repository) async {
+        guard FileManager.default.fileExists(atPath: repo.url.path) else { return }
+        if let status = try? await git.workingCopyStatus(at: repo.url) {
+            backgroundState(for: repo.id).apply(status)
+        }
+    }
+
+    /// Gitbox trick: typing a commit message triggers a fetch so you can pull
+    /// before committing. Rate-limited; selected repo only.
+    func opportunisticFetch() {
+        guard let repo = selectedRepository else { return }
+        let state = backgroundState(for: repo.id)
+        guard !state.isFetching else { return }
+        // ponytail: 30s rate limit, hardcoded
+        if let last = state.lastFetchAttempt, Date().timeIntervalSince(last) < 30 { return }
+        Task { await fetchQuietly(repo, state: state) }
     }
 
     // MARK: - Filesystem watching

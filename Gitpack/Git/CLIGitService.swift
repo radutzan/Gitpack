@@ -213,6 +213,10 @@ actor CLIGitService: GitService {
         var env = ProcessInfo.processInfo.environment
         env["LC_ALL"] = "C"
         env["GIT_TERMINAL_PROMPT"] = "0"
+        // Fail fast instead of hanging when auth would need interaction
+        // (background autofetch must be silent; interactive auth is out of scope).
+        env["GIT_ASKPASS"] = "/usr/bin/false"
+        env["SSH_ASKPASS"] = "/usr/bin/false"
 
         let result = try await ProcessRunner.run(
             executable: executable,

@@ -25,6 +25,7 @@ struct ContentView: View {
             appState.startWatchingSelectedRepository()
         }
         .task {
+            appState.startAutofetch()
             // Refresh when the app returns to the foreground, catching any
             // changes made while it was inactive.
             let activations = NotificationCenter.default.notifications(

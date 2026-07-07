@@ -38,6 +38,7 @@ struct RepositorySidebar: View {
     @ViewBuilder
     private func sidebarRow(for repo: Repository) -> some View {
         let vm = appState.viewModel(for: repo)
+        let background = appState.backgroundState(for: repo.id)
         HStack(spacing: 6) {
             Image(systemName: "folder.fill")
                 .foregroundStyle(.tint)
@@ -45,8 +46,12 @@ struct RepositorySidebar: View {
                 .lineLimit(1)
                 .foregroundStyle(vm.isMissing ? .secondary : .primary)
             Spacer(minLength: 4)
-            if let count = badgeCount(for: vm) {
-                Text(String(count))
+            if background.isFetching {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            if background.badge > 0 {
+                Text(String(background.badge))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 7)
@@ -55,6 +60,7 @@ struct RepositorySidebar: View {
                         Capsule(style: .continuous)
                             .fill(Color.secondary.opacity(0.18))
                     )
+                    .help("Unpushed + unmerged commits + changed files")
             }
         }
         .tag(repo.id)
@@ -66,11 +72,6 @@ struct RepositorySidebar: View {
                 appState.removeRepository(repo)
             }
         }
-    }
-
-    private func badgeCount(for vm: RepositoryViewModel) -> Int? {
-        guard let status = vm.status, !status.isClean else { return nil }
-        return status.entries.count
     }
 
     // MARK: - Add / drop
