@@ -6,6 +6,12 @@ enum HistoryItem: Hashable {
     case commit(String) // SHA
 }
 
+enum CommitMarker {
+    case none
+    case unpushed  // on current branch, not on the other branch (green)
+    case unmerged  // on the other branch, not on the current one (blue)
+}
+
 /// Per-repository view state. Cached so switching back to a repo is fast.
 @Observable
 @MainActor
@@ -16,6 +22,8 @@ final class RepositoryViewModel {
     var branches: [Branch] = []
     var currentBranch: String?
     var remoteBranches: [String] = []
+    var remotes: [Remote] = []
+    var divergence: Divergence?
     var selection: HistoryItem?
     var commitFiles: [String: [CommitFileChange]] = [:]
     var isLoading = false
@@ -47,15 +55,25 @@ final class RepositoryViewModel {
             async let statusTask = git.workingCopyStatus(at: url)
             async let branchesTask = git.branches(at: url)
             async let remoteBranchesTask = git.remoteBranches(at: url)
+            async let remotesTask = git.remotes(at: url)
 
             let status = try await statusTask
             let branches = try await branchesTask
             let remoteBranches = try await remoteBranchesTask
+            let remotes = try await remotesTask
 
             self.status = status
             self.branches = branches
             self.remoteBranches = remoteBranches
+            self.remotes = remotes
             self.currentBranch = status.branch ?? branches.first(where: \.isCurrent)?.name
+
+            // Divergence vs the "other branch" (upstream config, local or remote).
+            if let current = currentBranch, let other = otherBranch, other != current {
+                divergence = try? await git.divergence(current: current, other: other, at: url)
+            } else {
+                divergence = nil
+            }
 
             // Fresh history.
             loadedPages = 0
@@ -95,6 +113,46 @@ final class RepositoryViewModel {
         }
     }
 
+    /// The Gitbox "other branch": what the current branch is compared/synced
+    /// against. Stored as git-native upstream config, which accepts both
+    /// remote-tracking and local branches.
+    var otherBranch: String? {
+        status?.upstream ?? branches.first(where: \.isCurrent)?.upstream
+    }
+
+    var otherBranchIsLocal: Bool {
+        guard let otherBranch else { return false }
+        return branches.contains { $0.name == otherBranch }
+    }
+
+    func setOtherBranch(_ ref: String, using git: GitService) async {
+        guard let branch = currentBranch else { return }
+        do {
+            try await git.setUpstream(branch: branch, upstream: ref, at: repository.url)
+            await refreshAll(using: git)
+        } catch let error as GitError {
+            lastError = error.description
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func marker(for commit: Commit) -> CommitMarker {
+        guard let divergence else { return .none }
+        if divergence.unpushed.contains(commit.id) { return .unpushed }
+        if divergence.unmerged.contains(commit.id) { return .unmerged }
+        return .none
+    }
+
+    /// Refs shown in history: the current branch plus the "other branch" (so
+    /// unmerged commits interleave, Gitbox-style). Empty means HEAD.
+    private var historyRefs: [String] {
+        var refs: [String] = []
+        if let currentBranch { refs.append(currentBranch) }
+        if let otherBranch, otherBranch != currentBranch { refs.append(otherBranch) }
+        return refs
+    }
+
     func loadMoreHistory(using git: GitService) async {
         guard hasMoreHistory else { return }
         let url = repository.url
@@ -103,7 +161,7 @@ final class RepositoryViewModel {
                 at: url,
                 limit: pageSize,
                 skip: loadedPages * pageSize,
-                branch: currentBranch
+                refs: historyRefs
             )
             commits.append(contentsOf: page)
             loadedPages += 1
