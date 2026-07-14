@@ -45,6 +45,7 @@ Gitbox's identity: "see all your repositories at a glance." Requires an architec
 
 Gitbox's signature feature. ⌘F / toolbar field streams `git log -p` and filters live — no index.
 
+- **First task: migrate the history list to `NSTableView` (`NSViewRepresentable`).** Search stresses exactly what SwiftUI's List bridge is weakest at: streaming mutations, per-row substring highlighting, 10k+ rows, stable selection through constant filtering. Decided 2026-07-13 after the NavigationSplitView/HSplitView layout failures showed the SwiftUI↔AppKit bridge layer is where this app breaks; build the search UI once, on the real control. Keep the row design (two-line, dots, fixed height) and the manual width-persistence pattern from ContentView.
 - Matches commit metadata (author, SHA, date), file paths, and **added/removed diff lines**; space-separated tokens AND together; quoted phrases match exact case.
 - Yellow highlight of matched substrings in history rows, file lists, and message text.
 - Thin results bar atop the history list: live count ("152 commits") + progress spinner; Esc cancels the stream.
@@ -85,4 +86,4 @@ M1 before M2 because badges/dots are defined by the comparison model. M3 (search
 
 - Every new operation goes through the `GitService` protocol (CLI backend, NUL-terminated parsing — see `ARCHITECTURE.md`).
 - Parser tests (promised since v0.1) should land with M1 — the rev-list/ref parsing added there is exactly the fragile kind.
-- SwiftUI `List` performance with dots/labels/highlights on 10k+ rows: re-evaluate `NSTableView` interop at M3 (search highlighting) if scrolling degrades.
+- History list moves to `NSTableView` at the start of M3 (see M3 first task) — no longer conditional. Elsewhere the rule is: SwiftUI by default; when a component fights back on layout, focus, or performance fundamentals, wrap the AppKit original instead of stacking workarounds (see ContentView's custom split dividers for the pattern).
