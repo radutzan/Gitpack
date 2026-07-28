@@ -68,10 +68,18 @@ For the selected repo, the fetch's ref writes land via FSEvents (refs →
 
 ## Module layout
 
+The UI layer is migrating from SwiftUI to AppKit — see
+`docs/plans/2026-07-27-appkit-migration.md`. The shell is AppKit today; the
+three panes are still SwiftUI inside `NSHostingController`s and migrate one
+per phase.
+
 ```
 Gitpack/
 ├── App/
-│   ├── GitpackApp.swift        @main, scene, command menu
+│   ├── AppDelegate.swift       @main, lifecycle, menu actions + validation
+│   ├── MainWindowController.swift
+│   ├── MainSplitViewController.swift   3 panes, autosaved widths
+│   ├── MainMenu.swift          menu bar, built in code (no nib)
 │   └── AppState.swift          observable root state, per-repo view models
 ├── Git/
 │   ├── Models.swift            value types: Repository, Commit, FileChange...
@@ -83,12 +91,13 @@ Gitpack/
 ├── DiffTool/
 │   └── DiffToolService.swift   temp-file plumbing + opendiff invocation
 ├── Features/
-│   ├── Sidebar/RepositorySidebar.swift
-│   ├── History/HistoryList.swift
-│   ├── Detail/{DetailPane,CommitDetail,WorkingCopyDetail}.swift
-│   └── Toolbar/MainToolbar.swift
-├── Shared/Formatters.swift
-├── ContentView.swift
+│   ├── Sidebar/RepositorySidebar.swift   SwiftUI until phase D
+│   ├── History/HistoryList.swift         SwiftUI until phase B
+│   ├── Detail/{DetailPane,CommitDetail,WorkingCopyDetail}.swift  SwiftUI until phase C
+│   └── Toolbar/MainToolbar.swift         NSToolbarDelegate
+├── Shared/
+│   ├── Formatters.swift
+│   └── Observation+AppKit.swift  re-arming withObservationTracking
 └── Assets.xcassets
 ```
 

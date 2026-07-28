@@ -1,144 +1,181 @@
-import SwiftUI
 import AppKit
 
-struct MainToolbar: ToolbarContent {
-    @Environment(AppState.self) private var appState
-
-    var body: some ToolbarContent {
-        // Left: add repository, settings.
-        ToolbarItem(placement: .navigation) {
-            Button {
-                NotificationCenter.default.post(name: .addRepositoryRequested, object: nil)
-            } label: {
-                Image(systemName: "plus")
-            }
-            .help("Add Repository")
-        }
-        ToolbarItem(placement: .navigation) {
-            Button {
-                // Settings placeholder. Wired later.
-            } label: {
-                Image(systemName: "gearshape")
-            }
-            .help("Settings")
-            .disabled(true)
-        }
-
-        // Center: branch picker, sync controls, other-branch picker. macOS lays
-        // out a single principal item centered (and gives it precedence over the
-        // window title); multiple sibling `.principal` items fragment and drop
-        // out instead. Keep them as one principal item holding an HStack so the
-        // whole cluster renders together, centered.
-        ToolbarItem(placement: .principal) {
-            HStack(spacing: 8) {
-                BranchPicker()
-                SyncControls()
-                OtherBranchPicker()
-            }
-        }
-    }
+extension NSToolbarItem.Identifier {
+    static let addRepository = NSToolbarItem.Identifier("addRepository")
+    static let branchPicker = NSToolbarItem.Identifier("branchPicker")
+    static let syncControls = NSToolbarItem.Identifier("syncControls")
+    static let otherBranchPicker = NSToolbarItem.Identifier("otherBranchPicker")
 }
 
-private struct BranchPicker: View {
-    @Environment(AppState.self) private var appState
+/// Gitbox's toolbar: current branch, the pull/push pair, and the "other
+/// branch" it syncs against. The three centre items are one cluster —
+/// `centeredItemIdentifiers` keeps them centred without spacer juggling.
+final class MainToolbar: NSObject, NSToolbarDelegate {
+    let toolbar = NSToolbar(identifier: "MainToolbar")
 
-    var body: some View {
-        // Drive the display off the current branch (which `status` reports even
-        // for a repo with no commits yet), not off the `branches` list. A repo
-        // sitting on an unborn `main` has an empty `refs/heads`, but we still
-        // want the toolbar to read "main" rather than "—".
-        if let vm = appState.selectedViewModel, let current = vm.currentBranch {
-            Menu {
-                ForEach(vm.branches, id: \.name) { branch in
-                    Button {
-                        Task { await switchTo(branch.name, vm: vm) }
-                    } label: {
-                        HStack {
-                            if branch.isCurrent {
-                                Image(systemName: "checkmark")
-                            }
-                            Text(branch.name)
-                        }
-                    }
-                }
-            } label: {
-                Label(current, systemImage: "arrow.triangle.branch")
-                    .labelStyle(.titleAndIcon)
-                    .lineLimit(1)
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            // Nothing to switch to until there's more than the current branch.
-            .disabled(vm.branches.count <= 1)
-            .help("Current Branch")
+    private let appState: AppState
+    private var branchItem: NSMenuToolbarItem?
+    private var otherBranchItem: NSMenuToolbarItem?
+    private var syncControl: NSSegmentedControl?
+    private var modifiers: NSEvent.ModifierFlags = []
+    private var flagsMonitor: Any?
+
+    init(appState: AppState) {
+        self.appState = appState
+        super.init()
+
+        toolbar.delegate = self
+        toolbar.displayMode = .iconAndLabel
+        toolbar.allowsUserCustomization = false
+        toolbar.centeredItemIdentifiers = [.branchPicker, .syncControls, .otherBranchPicker]
+
+        // A local monitor rather than a responder-chain override: the labels
+        // should morph no matter which pane holds focus.
+        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.modifiers = event.modifierFlags
+            self?.updateSyncControl()
+            return event
+        }
+
+        observeChanges { [weak self] in
+            self?.refresh()
+        }
+    }
+
+    deinit {
+        if let flagsMonitor {
+            NSEvent.removeMonitor(flagsMonitor)
+        }
+    }
+
+    // MARK: - Toolbar delegate
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.addRepository, .branchPicker, .syncControls, .otherBranchPicker]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarDefaultItemIdentifiers(toolbar) + [.flexibleSpace, .space]
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier identifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        switch identifier {
+        case .addRepository:
+            let item = NSToolbarItem(itemIdentifier: identifier)
+            item.label = "Add Repository"
+            item.toolTip = "Add Repository"
+            item.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Repository")
+            item.action = #selector(AppDelegate.addRepository(_:))
+            item.target = nil // responder chain → AppDelegate
+            return item
+
+        case .branchPicker:
+            let item = makeMenuItem(
+                identifier,
+                symbol: "arrow.triangle.branch",
+                toolTip: "Current Branch"
+            )
+            branchItem = item
+            return item
+
+        case .otherBranchPicker:
+            let item = makeMenuItem(
+                identifier,
+                symbol: "point.3.connected.trianglepath.dotted",
+                toolTip: "Other Branch — what the current branch is compared and synced with"
+            )
+            otherBranchItem = item
+            return item
+
+        case .syncControls:
+            let control = NSSegmentedControl(
+                labels: ["Pull", "Push"],
+                trackingMode: .momentary,
+                target: self,
+                action: #selector(syncSegmentClicked(_:))
+            )
+            control.segmentStyle = .texturedRounded
+            syncControl = control
+            let item = NSToolbarItem(itemIdentifier: identifier)
+            item.label = "Sync"
+            item.view = control
+            updateSyncControl()
+            return item
+
+        default:
+            return nil
+        }
+    }
+
+    private func makeMenuItem(
+        _ identifier: NSToolbarItem.Identifier,
+        symbol: String,
+        toolTip: String
+    ) -> NSMenuToolbarItem {
+        let item = NSMenuToolbarItem(itemIdentifier: identifier)
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        item.toolTip = toolTip
+        item.showsIndicator = true
+        // Built on demand in `menuNeedsUpdate`, so it can never be stale and
+        // needs no observation of its own.
+        let menu = NSMenu()
+        menu.delegate = self
+        item.menu = menu
+        return item
+    }
+
+    // MARK: - State
+
+    private func refresh() {
+        let vm = appState.selectedViewModel
+
+        let current = vm?.currentBranch
+        branchItem?.title = current ?? "No Branch"
+        branchItem?.label = current ?? "No Branch"
+        branchItem?.isEnabled = (vm?.branches.count ?? 0) > 1
+
+        let other = vm?.otherBranch
+        otherBranchItem?.title = other ?? "No Branch"
+        otherBranchItem?.label = other ?? "No Branch"
+        otherBranchItem?.isEnabled = !(vm?.remoteBranches.isEmpty ?? true) || (vm?.branches.count ?? 0) > 1
+
+        updateSyncControl()
+    }
+
+    /// Pull/Push, morphing with held modifiers (⌥ → Fetch, ⇧⌘ → Rebase / Force
+    /// Push), collapsing to a single Merge segment when the other branch is local.
+    private func updateSyncControl() {
+        guard let control = syncControl else { return }
+        let vm = appState.selectedViewModel
+        let enabled = vm?.otherBranch != nil && vm?.isSyncing != true
+
+        if vm?.otherBranchIsLocal == true {
+            control.segmentCount = 1
+            configure(control, segment: 0, label: "Merge", symbol: "arrow.triangle.merge", enabled: enabled)
         } else {
-            Label("No Branch", systemImage: "arrow.triangle.branch")
-                .labelStyle(.titleAndIcon)
-                .foregroundStyle(.secondary)
+            control.segmentCount = 2
+            configure(control, segment: 0, label: downLabel, symbol: downSymbol, enabled: enabled)
+            configure(control, segment: 1, label: upLabel, symbol: "arrow.up", enabled: enabled)
         }
+        control.sizeToFit()
     }
 
-    private func switchTo(_ branch: String, vm: RepositoryViewModel) async {
-        do {
-            try await appState.git.checkout(branch: branch, at: vm.repository.url)
-            await vm.refreshAll(using: appState.git)
-        } catch let error as GitError {
-            vm.lastError = error.description
-        } catch {
-            vm.lastError = error.localizedDescription
-        }
-    }
-}
-
-/// Gitbox's pull/push pair. Labels morph live with held modifiers
-/// (⌥ → Fetch, ⇧⌘ → Rebase / Force Push), and the pair collapses to a single
-/// Merge button when the "other branch" is a local branch.
-private struct SyncControls: View {
-    @Environment(AppState.self) private var appState
-    @State private var modifiers: NSEvent.ModifierFlags = []
-    @State private var monitor: Any?
-
-    var body: some View {
-        HStack(spacing: 4) {
-            if let vm = appState.selectedViewModel, vm.otherBranch != nil, vm.otherBranchIsLocal {
-                Button {
-                    run(.merge, vm: vm)
-                } label: {
-                    Label("Merge", systemImage: "arrow.triangle.merge")
-                }
-                .help("Merge \(vm.otherBranch ?? "") into \(vm.currentBranch ?? "current branch")")
-                .disabled(vm.isSyncing)
-            } else {
-                let vm = appState.selectedViewModel
-                Button {
-                    if let vm { run(downAction, vm: vm) }
-                } label: {
-                    Label(downLabel, systemImage: downIcon)
-                }
-                .help("\(downLabel) from \(vm?.otherBranch ?? "the other branch")")
-                .disabled(vm == nil || vm?.otherBranch == nil || vm?.isSyncing == true)
-
-                Button {
-                    if let vm { run(upAction, vm: vm) }
-                } label: {
-                    Label(upLabel, systemImage: "arrow.up")
-                }
-                .help("\(upLabel) to \(vm?.otherBranch ?? "the other branch")")
-                .disabled(vm == nil || vm?.otherBranch == nil || vm?.isSyncing == true)
-            }
-        }
-        .onAppear {
-            // NSEvent monitor rather than .onModifierKeysChanged: fires regardless
-            // of which pane has focus, which is what a toolbar affordance wants.
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
-                modifiers = event.modifierFlags
-                return event
-            }
-        }
-        .onDisappear {
-            if let monitor { NSEvent.removeMonitor(monitor) }
-            monitor = nil
-        }
+    private func configure(
+        _ control: NSSegmentedControl,
+        segment: Int,
+        label: String,
+        symbol: String,
+        enabled: Bool
+    ) {
+        control.setLabel(label, forSegment: segment)
+        control.setImage(NSImage(systemSymbolName: symbol, accessibilityDescription: label), forSegment: segment)
+        control.setImageScaling(.scaleProportionallyDown, forSegment: segment)
+        control.setEnabled(enabled, forSegment: segment)
+        control.setWidth(0, forSegment: segment)
     }
 
     private var downAction: SyncAction {
@@ -155,7 +192,7 @@ private struct SyncControls: View {
         }
     }
 
-    private var downIcon: String {
+    private var downSymbol: String {
         downAction == .fetch ? "arrow.down.circle.dotted" : "arrow.down"
     }
 
@@ -167,73 +204,99 @@ private struct SyncControls: View {
         upAction == .forcePush ? "Force Push" : "Push"
     }
 
-    private func run(_ action: SyncAction, vm: RepositoryViewModel) {
+    // MARK: - Actions
+
+    @objc private func syncSegmentClicked(_ sender: NSSegmentedControl) {
+        guard let vm = appState.selectedViewModel else { return }
+        let action: SyncAction
+        if vm.otherBranchIsLocal {
+            action = .merge
+        } else {
+            action = sender.selectedSegment == 0 ? downAction : upAction
+        }
         Task { await vm.performSync(action, using: appState.git) }
+    }
+
+    @objc private func checkoutBranch(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String,
+              let vm = appState.selectedViewModel else { return }
+        Task {
+            do {
+                try await appState.git.checkout(branch: name, at: vm.repository.url)
+                await vm.refreshAll(using: appState.git)
+            } catch let error as GitError {
+                vm.lastError = error.description
+            } catch {
+                vm.lastError = error.localizedDescription
+            }
+        }
+    }
+
+    @objc private func selectOtherBranch(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String,
+              let vm = appState.selectedViewModel else { return }
+        Task { await vm.setOtherBranch(name, using: appState.git) }
     }
 }
 
-/// Gitbox's "other branch" popup: the branch the current one is compared and
-/// synced against. Remote branches (grouped per remote when there are several)
-/// plus other local branches. Stored as upstream config.
-private struct OtherBranchPicker: View {
-    @Environment(AppState.self) private var appState
+// MARK: - Menu building
 
-    var body: some View {
-        if let vm = appState.selectedViewModel {
-            Menu {
-                let locals = vm.branches.filter { !$0.isCurrent }
-                if !locals.isEmpty {
-                    Section("Local Branches") {
-                        ForEach(locals, id: \.name) { branch in
-                            selectionButton(branch.name, vm: vm)
-                        }
-                    }
-                }
-                if vm.remotes.count > 1 {
-                    ForEach(vm.remotes, id: \.name) { remote in
-                        Menu(remote.name) {
-                            ForEach(branches(of: remote.name, vm: vm), id: \.self) { name in
-                                selectionButton(name, vm: vm)
-                            }
-                        }
-                    }
-                } else if !vm.remoteBranches.isEmpty {
-                    Section("Remote Branches") {
-                        ForEach(vm.remoteBranches, id: \.self) { name in
-                            selectionButton(name, vm: vm)
-                        }
-                    }
-                }
-            } label: {
-                Label(vm.otherBranch ?? "No Branch", systemImage: "point.3.connected.trianglepath.dotted")
-                    .labelStyle(.titleAndIcon)
-                    .lineLimit(1)
+extension MainToolbar: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        guard let vm = appState.selectedViewModel else { return }
+
+        if menu === branchItem?.menu {
+            for branch in vm.branches {
+                menu.addItem(item(
+                    branch.name,
+                    action: #selector(checkoutBranch(_:)),
+                    checked: branch.isCurrent
+                ))
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .disabled(vm.remoteBranches.isEmpty && vm.branches.count <= 1)
-            .help("Other Branch — what the current branch is compared and synced with")
-        } else {
-            Label("No Branch", systemImage: "point.3.connected.trianglepath.dotted")
-                .labelStyle(.titleAndIcon)
-                .foregroundStyle(.secondary)
+        } else if menu === otherBranchItem?.menu {
+            buildOtherBranchMenu(menu, vm: vm)
         }
     }
 
-    private func branches(of remote: String, vm: RepositoryViewModel) -> [String] {
-        vm.remoteBranches.filter { $0.hasPrefix(remote + "/") }
-    }
-
-    private func selectionButton(_ name: String, vm: RepositoryViewModel) -> some View {
-        Button {
-            Task { await vm.setOtherBranch(name, using: appState.git) }
-        } label: {
-            HStack {
-                if name == vm.otherBranch {
-                    Image(systemName: "checkmark")
-                }
-                Text(name)
+    private func buildOtherBranchMenu(_ menu: NSMenu, vm: RepositoryViewModel) {
+        let locals = vm.branches.filter { !$0.isCurrent }
+        if !locals.isEmpty {
+            menu.addItem(.sectionHeader(title: "Local Branches"))
+            for branch in locals {
+                menu.addItem(otherBranchMenuItem(branch.name, vm: vm))
             }
         }
+
+        if vm.remotes.count > 1 {
+            for remote in vm.remotes {
+                let names = vm.remoteBranches.filter { $0.hasPrefix(remote.name + "/") }
+                guard !names.isEmpty else { continue }
+                let submenu = NSMenu(title: remote.name)
+                for name in names {
+                    submenu.addItem(otherBranchMenuItem(name, vm: vm))
+                }
+                let parent = NSMenuItem(title: remote.name, action: nil, keyEquivalent: "")
+                parent.submenu = submenu
+                menu.addItem(parent)
+            }
+        } else if !vm.remoteBranches.isEmpty {
+            menu.addItem(.sectionHeader(title: "Remote Branches"))
+            for name in vm.remoteBranches {
+                menu.addItem(otherBranchMenuItem(name, vm: vm))
+            }
+        }
+    }
+
+    private func otherBranchMenuItem(_ name: String, vm: RepositoryViewModel) -> NSMenuItem {
+        item(name, action: #selector(selectOtherBranch(_:)), checked: name == vm.otherBranch)
+    }
+
+    private func item(_ title: String, action: Selector, checked: Bool) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.representedObject = title
+        item.state = checked ? .on : .off
+        return item
     }
 }

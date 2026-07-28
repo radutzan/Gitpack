@@ -21,7 +21,7 @@ The Xcode target uses `PBXFileSystemSynchronizedRootGroup`: new files under `Git
 
 ## Architecture
 
-Layering is `Features/` (SwiftUI views) → `AppState` → `GitService` → `ProcessRunner` → `git`. Views never touch `ProcessRunner`; every git operation is a `GitService` protocol method with a `CLIGitService` implementation.
+Layering is `App/` (shell) + `Features/` (panes) → `AppState` → `GitService` → `ProcessRunner` → `git`. Views never touch `ProcessRunner`; every git operation is a `GitService` protocol method with a `CLIGitService` implementation.
 
 **Two kinds of per-repo state.** `RepositoryViewModel` (full model: commits, status, branches, divergence) exists only for the selected repo. `RepoBackgroundState` (badge counts, fetch flag, backoff) exists for *every* sidebar repo and is fed by one `git status --porcelain=v2 --branch` call — `branch.ab` gives ahead/behind, the entry list gives the stage count. Adding a new sidebar-visible signal should go through `RepoBackgroundState`, not by loading more view models.
 
@@ -38,7 +38,9 @@ Layering is `Features/` (SwiftUI views) → `AppState` → `GitService` → `Pro
 - **Never add interactive auth.** All git runs with `GIT_TERMINAL_PROMPT=0` and `GIT_ASKPASS`/`SSH_ASKPASS` at `/usr/bin/false` so background fetch fails fast instead of hanging. Credentials, signing, hooks are the user's terminal config, by design.
 - **History rows need explicit fixed heights** (41pt + 2pt vertical padding). With automatic heights, the backing NSTableView's estimates for unmaterialized rows diverge from measured two-line rows and scroll-to-row blanks the pane.
 - **`refreshAll` assigns conditionally** (`if fresh != commits`). It runs on every activation and autofetch; unconditional assignment rebuilds the table mid-click and drops selection.
-- **Pane layout is hand-rolled.** `NavigationSplitView` and `HSplitView` both failed here (see the comment in `ContentView.swift`); widths live in `UserDefaults` and are written on drag end. Don't "simplify" it back to a framework splitter.
-- **AppKit escape hatch:** SwiftUI by default; when a component fights back on layout, focus, or performance fundamentals, wrap the AppKit control rather than stacking workarounds. The history list moves to `NSTableView` at the start of M3 (search) — that's decided, not conditional.
-- **Menu → view commands go through `NotificationCenter`** names in `GitpackApp.swift` (`.stageAllRequested`, `.commitRequested`, `.addRepositoryRequested`); bare-key Gitbox shortcuts (`u`/`p`/`s`/`d`) go through `.onKeyPress` on the focused list so they don't fight text fields.
+- **The UI is migrating to AppKit** — `docs/plans/2026-07-27-appkit-migration.md`, phase by phase. Phase A (shell: `AppDelegate` → `MainWindowController` → `MainSplitViewController` → `MainToolbar` → `MainMenu`) is done; the three panes are still SwiftUI inside `NSHostingController`s until phases B (history), C (detail), D (sidebar). Write new UI in AppKit. Do not add SwiftUI wrappers around AppKit controls — that bridge direction is what failed.
+- **`AppDelegate` declares its own `static func main()`.** Inheriting the `NSApplicationDelegate` default routes through `NSApplicationMain`, which expects a main nib to instantiate the delegate. There is no nib, so the app would launch to a default menu bar and no window.
+- **`splitView.autosaveName` is assigned after the split view items are added.** Set before, AppKit restores widths on launch but silently stops recording drags.
+- **Menu actions use `target: nil`** so validation flows through the responder chain into `AppDelegate.validateMenuItem` (that is what replaces SwiftUI's `.disabled(…)`). Stage All / Commit still hop through `NotificationCenter` names in `AppDelegate.swift` because the detail pane is still SwiftUI; Phase E removes them. Bare-key Gitbox shortcuts (`u`/`p`/`s`/`d`) stay on the focused list so they don't fight text fields.
+- **AppKit invalidation goes through `observeChanges`** (`Shared/Observation+AppKit.swift`), a re-arming `withObservationTracking`. `AppState`/`RepositoryViewModel` keep `@Observable` — don't reach for Combine or KVO.
 - **`// ponytail:` comments mark deliberate simplifications** with their ceiling (fixed 60s fetch cycle, 30s rate limit, no jitter). Respect them as decisions; when raising one, update the comment.

@@ -22,9 +22,6 @@ struct RepositorySidebar: View {
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             handleDrop(providers: providers)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .addRepositoryRequested)) { _ in
-            promptToAddRepository()
-        }
     }
 
     private var topLevelRepositories: [Repository] {
@@ -74,22 +71,7 @@ struct RepositorySidebar: View {
         }
     }
 
-    // MARK: - Add / drop
-
-    private func promptToAddRepository() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = true
-        panel.prompt = "Add"
-        panel.message = "Choose one or more Git repositories"
-        guard panel.runModal() == .OK else { return }
-        Task {
-            for url in panel.urls {
-                _ = await appState.addRepository(at: url)
-            }
-        }
-    }
+    // MARK: - Drop
 
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
         var handled = false
