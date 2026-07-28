@@ -141,6 +141,15 @@ task, done early so search is built once on the real control.
    navigation changes the detail pane; scroll to the bottom of a long history without blanking.
 9. **Commit:** `refactor: history list on NSTableView`
 
+**What this phase actually needed beyond the sketch above.** Two behaviours fall out of
+reloading an `NSTableView` that SwiftUI's `List` handled implicitly, and both are now
+`CLAUDE.md` entries: the scroll offset must be captured and restored around `reloadData()`,
+and the selection must be re-applied *without* scrolling — otherwise clicking "Load more"
+appends 200 rows and throws you back to the top. `RepositoryViewModel.hasMoreHistory`
+became `private(set)` so the paging row keys off the real answer instead of
+`commits.count >= 200`, which never goes false once you've paged past the first screen.
+Dropped: `.refreshable` pull-to-refresh (not a Mac idiom; ⌘R can land in M5 if wanted).
+
 ---
 
 ## Phase C — Detail pane → `NSViewController`

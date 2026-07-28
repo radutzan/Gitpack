@@ -92,7 +92,7 @@ Gitpack/
 │   └── DiffToolService.swift   temp-file plumbing + opendiff invocation
 ├── Features/
 │   ├── Sidebar/RepositorySidebar.swift   SwiftUI until phase D
-│   ├── History/HistoryList.swift         SwiftUI until phase B
+│   ├── History/{HistoryViewController,CommitRowView}.swift  NSTableView
 │   ├── Detail/{DetailPane,CommitDetail,WorkingCopyDetail}.swift  SwiftUI until phase C
 │   └── Toolbar/MainToolbar.swift         NSToolbarDelegate
 ├── Shared/

@@ -40,7 +40,7 @@ final class MainSplitViewController: NSSplitViewController {
         // History is the pane with the lowest holding priority, so it absorbs
         // window resize; the outer two keep the widths you gave them until
         // history hits its 320 floor.
-        let history = NSSplitViewItem(viewController: pane(HistoryList()))
+        let history = NSSplitViewItem(viewController: HistoryViewController(appState: appState))
         history.minimumThickness = 320
         history.holdingPriority = NSLayoutConstraint.Priority(250)
         history.canCollapse = false

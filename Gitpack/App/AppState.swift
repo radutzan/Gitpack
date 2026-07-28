@@ -75,7 +75,10 @@ final class RepositoryViewModel {
     var isMissing = false
 
     private let pageSize = 200
-    private var hasMoreHistory = true
+    /// Readable so the history list can show its "Load more" row off the real
+    /// answer rather than guessing from `commits.count >= pageSize`, which stays
+    /// true forever once you've paged past the first screen.
+    private(set) var hasMoreHistory = true
 
     init(repository: Repository) {
         self.repository = repository
