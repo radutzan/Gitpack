@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A minimalist macOS Git client, clean-room successor to Gitbox 1.6.3. Pure AppKit, no dependencies, no test target — the whole app shells out to `/usr/bin/git`.
 
-Docs, in order of authority for scope: `docs/plans/2026-07-06-gitbox-replica-roadmap.md` (current scope, supersedes spec §3) → `ARCHITECTURE.md` (design decisions and rationale — read it before non-trivial work) → `Gitpack-Spec.md` (original v0.1 spec, largely historical).
+Docs, in order of authority for scope: `docs/plans/2026-07-06-gitbox-replica-roadmap.md` (current scope) → `ARCHITECTURE.md` (design decisions and rationale — read it before non-trivial work).
 
 ## Commands
 

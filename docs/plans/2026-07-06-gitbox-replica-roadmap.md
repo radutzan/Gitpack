@@ -1,6 +1,6 @@
 # Gitpack — Gitbox Replica Roadmap
 
-Supersedes the scope section of `Gitpack-Spec.md` (§3), which described only the v0.1 baseline. The target is now the functionality of **Gitbox 1.6.3** (Oleg Andreev, 2010–2012) — same structure, density, interactions, and shortcuts, rendered with modern native macOS styling. Not a pixel recreation of the 2011 look.
+Supersedes the original v0.1 spec, which described only the baseline below. The target is now the functionality of **Gitbox 1.6.3** (Oleg Andreev, 2010–2012) — same structure, density, interactions, and shortcuts, rendered with modern native macOS styling. Not a pixel recreation of the 2011 look.
 
 Primary reference: the open-sourced original at [github.com/oleganza/gitbox](https://github.com/oleganza/gitbox) (Apache-2.0, ObjC). Especially worth mining verbatim: `Documents/Search.txt` (full search spec), `Documents/Refresh.txt` (FSEvents/timer refresh policy), `Documents/UI.txt`, and `Classes/GBRepositoryController.m` (the action/undo/badge logic). Archived marketing site + screenshots: `web.archive.org/web/2012/http://gitboxapp.com/`.
 
