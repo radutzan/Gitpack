@@ -45,7 +45,7 @@ final class MainSplitViewController: NSSplitViewController {
         history.holdingPriority = NSLayoutConstraint.Priority(250)
         history.canCollapse = false
 
-        let detail = NSSplitViewItem(viewController: pane(DetailPane()))
+        let detail = NSSplitViewItem(viewController: DetailViewController(appState: appState))
         detail.minimumThickness = 320
         detail.holdingPriority = NSLayoutConstraint.Priority(260)
         detail.canCollapse = false

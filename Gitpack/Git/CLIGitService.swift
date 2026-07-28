@@ -110,8 +110,12 @@ actor CLIGitService: GitService {
     }
 
     func filesInCommit(at url: URL, sha: String) async throws -> [CommitFileChange] {
+        // --root so the initial commit lists the files it added; without it
+        // diff-tree emits nothing for a parentless commit and the detail pane
+        // reads "No file changes". Output format is unchanged for every other
+        // commit.
         let result = try await runGit([
-            "diff-tree", "--no-commit-id", "--name-status", "-r", "-z", sha
+            "diff-tree", "--no-commit-id", "--name-status", "-r", "-z", "--root", sha
         ], at: url)
         return DiffTreeParser.parse(result.stdoutString)
     }

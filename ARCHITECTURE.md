@@ -93,10 +93,11 @@ Gitpack/
 ├── Features/
 │   ├── Sidebar/RepositorySidebar.swift   SwiftUI until phase D
 │   ├── History/{HistoryViewController,CommitRowView}.swift  NSTableView
-│   ├── Detail/{DetailPane,CommitDetail,WorkingCopyDetail}.swift  SwiftUI until phase C
+│   ├── Detail/{Detail,WorkingCopy,Commit}ViewController.swift + FileRowView.swift
 │   └── Toolbar/MainToolbar.swift         NSToolbarDelegate
 ├── Shared/
 │   ├── Formatters.swift
+│   ├── KeyTableView.swift        bare-key shortcuts before type-select
 │   └── Observation+AppKit.swift  re-arming withObservationTracking
 └── Assets.xcassets
 ```

@@ -100,15 +100,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NSWorkspace.shared.open([url], withApplicationAt: terminal, configuration: NSWorkspace.OpenConfiguration())
     }
 
-    // ponytail: these two still go through NotificationCenter because the
-    // detail pane is still SwiftUI. Phase E moves them onto the responder
-    // chain, where the focused pane validates and handles them directly.
+    // Both are pure model operations (the draft message lives on the view
+    // model), so they work from any pane rather than only when the detail
+    // pane holds focus — which is what routing them through the responder
+    // chain to the composer would have cost.
     @objc func stageAll(_ sender: Any?) {
-        NotificationCenter.default.post(name: .stageAllRequested, object: nil)
+        guard let vm = appState.selectedViewModel else { return }
+        Task { await appState.stageAll(vm) }
     }
 
     @objc func commitChanges(_ sender: Any?) {
-        NotificationCenter.default.post(name: .commitRequested, object: nil)
+        guard let vm = appState.selectedViewModel else { return }
+        Task { await appState.commit(vm) }
     }
 
     // MARK: - Menu validation
@@ -129,15 +132,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return vm != nil && !busy
         case #selector(openInFinder(_:)), #selector(openInTerminal(_:)):
             return appState.selectedRepository != nil
-        case #selector(stageAll(_:)), #selector(commitChanges(_:)):
-            return !(vm?.status?.isClean ?? true)
+        case #selector(stageAll(_:)):
+            return !(vm?.unstagedPaths.isEmpty ?? true)
+        case #selector(commitChanges(_:)):
+            return vm?.canCommit == true
         default:
             return true
         }
     }
-}
-
-extension Notification.Name {
-    static let stageAllRequested = Notification.Name("Gitpack.stageAllRequested")
-    static let commitRequested = Notification.Name("Gitpack.commitRequested")
 }

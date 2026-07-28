@@ -193,6 +193,19 @@ controllers; the commit composer becomes an `NSTextView`.
    status text, ⌘↩ commits, selecting a commit lists its files.
 7. **Commit:** `refactor: detail pane on AppKit view controllers`
 
+**Done differently from the sketch, and why.** The `NotificationCenter` shims (Phase E's
+task 1) went away here instead: moving the commit draft onto
+`RepositoryViewModel.commitMessage` turns Commit and Stage All into pure model operations
+on `AppState`, so they need no view at all. That is *better* than routing them through the
+responder chain, which would have made ⌘↩ work only while the detail pane held focus. The
+message body is a wrapping `NSTextField` in a scroll view rather than an `NSTextView` —
+the label has a real intrinsic height, which is what lets it grow to fit and cap at 220pt.
+Two traps banked in `CLAUDE.md`: a separator `NSBox` needs an explicit 1pt height or it
+absorbs the pane, and hidden views keep their constraints in AppKit (so the message box
+also needs pinning to zero when empty). Dropped: the ⌘↩-focuses-the-composer fallback
+(the menu item is simply disabled until a commit is possible) and the accent-coloured
+author email (now plain `Name <email>`).
+
 ---
 
 ## Phase D — Sidebar → `NSOutlineView`
@@ -236,11 +249,9 @@ controllers; the commit composer becomes an `NSTextView`.
 
 **Tasks:**
 
-1. Stage All / Commit menu items become `target: nil` selectors
-   (`stageAll(_:)`, `commit(_:)`) implemented on `WorkingCopyViewController` — it is in the
-   responder chain when the detail pane has focus, and `validateMenuItem` there replaces
-   the `status?.isClean` checks currently living in the menu builder.
-2. Delete the notification names and every `onReceive`/`post` for them.
+1. ~~Stage All / Commit off `NotificationCenter`~~ — **done in phase C**, as model
+   operations on `AppState` rather than responder-chain actions, so they work from any pane.
+2. ~~Delete the notification names~~ — **done in phase C**.
 3. Grep for `import SwiftUI` across `Gitpack/` — expect zero hits.
 4. Add ←/→ pane focus navigation (`makeFirstResponder` across the three panes) — an M5
    item that is now nearly free.

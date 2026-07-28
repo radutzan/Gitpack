@@ -74,6 +74,36 @@ final class RepositoryViewModel {
     var lastError: String?
     var isMissing = false
 
+    /// The commit message lives here rather than in the composer so ⌘↩ from the
+    /// menu bar can commit without reaching into the view hierarchy, and so a
+    /// draft survives clicking away to a commit and back.
+    var commitMessage = ""
+
+    var unstagedPaths: [String] {
+        status?.entries.filter { $0.unstagedStatus != nil }.map(\.path) ?? []
+    }
+
+    var canCommit: Bool {
+        let hasStaged = status?.entries.contains { $0.stagedStatus != nil } ?? false
+        return hasStaged && !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Runs a git call and funnels either flavour of failure into `lastError`.
+    /// Every call site used to repeat the same two-clause catch.
+    @discardableResult
+    func run(_ operation: () async throws -> Void) async -> Bool {
+        do {
+            try await operation()
+            return true
+        } catch let error as GitError {
+            lastError = error.description
+            return false
+        } catch {
+            lastError = error.localizedDescription
+            return false
+        }
+    }
+
     private let pageSize = 200
     /// Readable so the history list can show its "Load more" row off the real
     /// answer rather than guessing from `commits.count >= pageSize`, which stays
@@ -340,6 +370,25 @@ final class AppState {
     var selectedViewModel: RepositoryViewModel? {
         guard let repo = selectedRepository else { return nil }
         return viewModel(for: repo)
+    }
+
+    /// Commit and Stage All are pure model operations — no view involved — so
+    /// the menu item and the composer's button can share one implementation
+    /// without the menu having to reach into the detail pane.
+    func commit(_ vm: RepositoryViewModel) async {
+        let message = vm.commitMessage
+        let committed = await vm.run {
+            try await self.git.commit(message: message, at: vm.repository.url)
+        }
+        if committed { vm.commitMessage = "" }
+        await vm.refreshAll(using: git)
+    }
+
+    func stageAll(_ vm: RepositoryViewModel) async {
+        let paths = vm.unstagedPaths
+        guard !paths.isEmpty else { return }
+        await vm.run { try await self.git.stage(paths: paths, at: vm.repository.url) }
+        await vm.refreshStatusOnly(using: git)
     }
 
     func addRepository(at url: URL) async -> Bool {

@@ -15,7 +15,7 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
     }
 
     private let appState: AppState
-    private let tableView = HistoryTableView()
+    private let tableView = KeyTableView()
     private let scrollView = NSScrollView()
     private let placeholder = HistoryPlaceholderView()
     private let errorBanner = ErrorBannerView()
@@ -277,19 +277,6 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
         default:
             return false
         }
-    }
-}
-
-/// Intercepts unmodified `u`/`p` before NSTableView turns them into type-select.
-private final class HistoryTableView: NSTableView {
-    var onBareKey: ((String) -> Bool)?
-
-    override func keyDown(with event: NSEvent) {
-        let bare = event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty
-        if bare, let key = event.charactersIgnoringModifiers, onBareKey?(key) == true {
-            return
-        }
-        super.keyDown(with: event)
     }
 }
 
