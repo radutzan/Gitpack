@@ -55,6 +55,7 @@
 				7C018E0C2F9DD1F800751F13 /* Sources */,
 				7C018E0D2F9DD1F800751F13 /* Frameworks */,
 				7C018E0E2F9DD1F800751F13 /* Resources */,
+				7CA1000000000000000000B1 /* Stamp build number */,
 			);
 			buildRules = (
 			);
@@ -114,6 +115,28 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		7CA1000000000000000000B1 /* Stamp build number */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Stamp build number";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# CFBundleVersion = commits on the current branch. Runs before codesign.\ncount=$(/usr/bin/git -C \"$SRCROOT\" rev-list --count HEAD 2>/dev/null) || exit 0\n[ -n \"$count\" ] || exit 0\n/usr/libexec/PlistBuddy -c \"Set :CFBundleVersion $count\" \"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		7C018E0C2F9DD1F800751F13 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -163,7 +186,7 @@
 				DEVELOPMENT_TEAM = 7VT456V4Y2;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -227,7 +250,7 @@
 				DEVELOPMENT_TEAM = 7VT456V4Y2;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
