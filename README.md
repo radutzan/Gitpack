@@ -27,7 +27,8 @@ xcodebuild -project Gitpack.xcodeproj -scheme Gitpack -configuration Debug build
 
 - Add/remove repositories (file picker, drag-and-drop folders, persistence in `~/Library/Application Support/Gitpack/repositories.json`)
 - Linear commit history with author / date / subject; merge commits styled distinctly
-- Working copy: per-file stage / unstage via checkbox, context menu, or `s`
+- Working copy: per-file stage / unstage via checkbox, context menu, or `s`; discard changes, reveal in Finder, copy path
+- Three resizable panes whose widths persist across launches
 - Commit (respects hooks and signing — they run as your terminal would run them)
 - **"Other branch" comparison model** (Gitbox-style): pick a remote or local branch to compare/sync against; stored as upstream config
 - Pull / push / fetch / rebase / force-push / merge — toolbar buttons morph with held modifiers (⌥ → Fetch, ⇧⌘ → Rebase / Force Push; local target → Merge)

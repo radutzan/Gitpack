@@ -2,6 +2,13 @@
 
 A minimalist, fast Git client for macOS. Spiritual successor to Gitbox.
 
+> **Historical document (2026-04).** This is the original v0.1 brief, kept for its
+> vision, UI prescriptions, and Gitbox reference notes (§1, §2, §4, §6.7, Appendix A
+> still hold). **Scope is no longer set here** — `docs/plans/2026-07-06-gitbox-replica-roadmap.md`
+> is canonical, and the technical decisions this document deferred are resolved in
+> `ARCHITECTURE.md`. Where the two disagree, the roadmap wins. Sections below carry
+> inline notes where they have been overtaken.
+
 ---
 
 ## 1. Vision
@@ -15,6 +22,10 @@ Gitpack is a clean-room rewrite in modern Swift/SwiftUI that preserves what made
 - **Speed and quietness** — no chrome, no nags, no telemetry.
 
 Gitpack is **not** trying to be Tower, Fork, or GitKraken. It is deliberately scoped down. Power features (rebase, cherry-pick, merge conflict resolution, submodules, worktrees, LFS, etc.) are explicit non-goals for v0.1.
+
+> Superseded: merge and rebase shipped in M1; cherry-pick, revert, reset and a
+> rebase-conflict state are scheduled for M4. Submodules stay parked. The
+> restraint principle holds — the specific list does not.
 
 ---
 
@@ -30,6 +41,9 @@ A developer who:
 ---
 
 ## 3. Scope — v0.1
+
+> **Superseded in full** by the roadmap. This section describes the v0.1 baseline,
+> which shipped; current scope is the Gitbox 1.6.3 feature set across M1–M5.
 
 ### In scope
 
@@ -59,6 +73,11 @@ A developer who:
 - Settings sync, telemetry, crash reporting.
 
 ### Likely v0.2+ candidates (not promises)
+
+> Replaced by the roadmap's milestones and exclusions: branch CRUD, stash and tags
+> are M4; search is M3. **Hunk-level staging and history graph are now permanently
+> excluded from the project** (as is an in-app diff viewer) — not deferred. Gitbox
+> 1.x never had them either.
 
 - Branch CRUD.
 - Stash.
@@ -133,6 +152,9 @@ A developer who:
 
 **Use whatever modern SwiftUI APIs require.** Prefer the newest macOS that's reasonable to ship against today. If a feature genuinely requires falling back to AppKit (e.g., `NSTableView` for the commit list if SwiftUI's `Table` proves too slow with thousands of rows), that's acceptable — wrap it cleanly.
 
+> Shipped target: macOS 15.7. The AppKit fallback stopped being hypothetical — see
+> §8.4 and the roadmap's standing technical notes.
+
 Do not bend over backward to support older macOS versions. This is a fresh start.
 
 ---
@@ -146,6 +168,10 @@ Do not bend over backward to support older macOS versions. This is a fresh start
 - Swift Concurrency (`async/await`, actors) for all git operations — never block the main thread on git work.
 
 ### 6.2 Git backend — recommendation requested
+
+> **Resolved: pure CLI shell-out** (not the hybrid recommended below). Rationale in
+> `ARCHITECTURE.md`. `GitService` remains the seam if a libgit2 read side is ever
+> worth adding.
 
 **Decision deferred to Claude Code.** Pick one of:
 
@@ -167,6 +193,11 @@ Whatever is chosen, document the rationale in the repo's `README.md` and `ARCHIT
 
 ### 6.3 Authentication — recommendation requested
 
+> **Resolved as recommended: Gitpack does nothing.** All network ops shell out to
+> system git; no Keychain UI, no key management. Background fetch additionally runs
+> with `GIT_TERMINAL_PROMPT=0` and askpass disabled so non-interactive auth fails
+> fast instead of hanging.
+
 **Decision deferred to Claude Code**, contingent on the backend choice.
 
 - If shelling out to `git` (for network ops): auth is essentially free — the system git already handles SSH agents, keychain, credential helpers, OAuth tokens via `git-credential-osxkeychain`, etc. Gitpack should do nothing special.
@@ -175,11 +206,22 @@ Whatever is chosen, document the rationale in the repo's `README.md` and `ARCHIT
 **Recommendation**: regardless of backend, **delegate network operations to the system `git` binary** so authentication is the user's existing terminal setup, unchanged. No keychain prompts from Gitpack itself. No "add SSH key" UI. If `git push` works in their terminal, it works in Gitpack.
 
 ### 6.4 Repository persistence
+
+> Built as specified, with two loose ends: the "missing on disk" state only greys
+> the sidebar row (no label or icon), and nested sub-repos are modelled
+> (`Repository.parentID`, rendered by the sidebar) but nothing ever sets a parent —
+> the roadmap has sidebar groups as "maybe later".
 - Store the list of tracked repositories in `~/Library/Application Support/Gitpack/repositories.json` (or equivalent via `FileManager.urls(for: .applicationSupportDirectory)`).
 - Use security-scoped bookmarks if sandboxed; raw paths if not. **Recommend non-sandboxed for v0.1** — sandboxing a Git client is a battle, and this isn't a Mac App Store target.
 - Detect when a tracked repo has been moved or deleted on disk; show a clear "missing" state in the sidebar rather than crashing.
 
 ### 6.5 External diff tool integration
+
+> **Partly unbuilt, and unowned by any milestone.** The temp-file plumbing and
+> `opendiff $LEFT $RIGHT` default exist, but: there is no Settings window (the
+> toolbar gear is disabled), so the command is init-only and not user-configurable;
+> and temp dirs are collected in `DiffToolService.tempDirs` but never deleted.
+> Both need a home in a milestone.
 - Default tool: FileMerge via `opendiff <file_in_HEAD> <file_in_working_copy>`.
 - Settings: a single text field in preferences for "Diff tool command" with `$LEFT` and `$RIGHT` placeholders. Default value: `opendiff $LEFT $RIGHT`.
 - For diffing a working-copy file: write the HEAD version of the file to a temp file, pass both paths to the diff tool.
@@ -232,11 +274,23 @@ Models should be value types (`struct Commit`, `struct FileChange`, `struct Repo
 
 ## 8. Open questions for Claude Code to answer in implementation
 
+**All answered — kept for the record. Rationale for 1, 3 and 5 is in `ARCHITECTURE.md`.**
+
 1. **Backend choice**: pure libgit2, pure CLI, or hybrid? Justify in `ARCHITECTURE.md`.
+   → **Pure CLI.** One mental model; hooks, signing, credential helpers and config
+   come free. `GitService` stays the seam if reads ever need libgit2.
 2. **SwiftGit2 vs. fresh wrapper**: if libgit2 is used, is SwiftGit2 healthy enough to depend on, or should we vendor libgit2 directly with a minimal Swift wrapper?
+   → **Moot.** No libgit2, no dependencies at all.
 3. **Authentication wiring**: confirm that delegating to system `git` for network ops is sufficient and document any edge cases.
+   → **Sufficient, and total.** Edge case that shaped the design: background autofetch
+   must never block on a prompt, so all git runs disable terminal prompts and askpass.
 4. **Commit list virtualization**: does SwiftUI's `Table` / `List` handle 10k+ rows acceptably, or do we need `NSTableView` interop from day one?
+   → **`NSTableView` is required, decided 2026-07-13.** Not for row count but for
+   streaming mutations, per-row highlighting and stable selection under live search;
+   SwiftUI's List bridge also caused the layout failures behind the custom split
+   dividers. The migration is M3's first task, unconditional.
 5. **Sandbox**: stay un-sandboxed for v0.1 — confirm or push back.
+   → **Confirmed off**, hardened runtime on. Not a Mac App Store target.
 
 ---
 
@@ -247,6 +301,8 @@ Models should be value types (`struct Commit`, `struct FileChange`, `struct Repo
 - `README.md` with build instructions and architecture overview.
 - `ARCHITECTURE.md` documenting backend decisions and rationale.
 - Basic unit tests for the `GitService` layer.
+  > Partial: parser-level tests only (`Tests/run-tests.sh`), no test target. The
+  > `GitService` layer itself is still untested.
 - No installer, no DMG, no notarization concerns yet — just a working dev build.
 
 ---
