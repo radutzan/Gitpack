@@ -233,6 +233,20 @@ author email (now plain `Name <email>`).
    dropping a folder adds a repo, reorder survives relaunch.
 8. **Commit:** `feat: sidebar on NSOutlineView with drag-reorder`
 
+**The prerequisite the sketch missed.** `RepositoryStore` was not `@Observable`, and
+`AppState.repositories` is a computed passthrough to its array — so the repository list was
+invisible to observation. The SwiftUI sidebar only ever refreshed because add/remove also
+assigned `selectedRepositoryID`; removing a repository that wasn't selected left a stale
+row on screen. Making the store `@Observable` is what lets `observeChanges` drive this
+pane at all. Two more findings, both in `CLAUDE.md`: observable state has to be read up
+front in the observation body rather than inside a loop over materialized cells (right
+after `reloadData` there are none, so no dependency is registered and badges never
+appear), and the single group row needs `shouldCollapseItem` → `false` or clicking it
+blanks the sidebar. The split view keeps a plain item rather than
+`sidebarWithViewController:` — the outline draws its own `.sourceList` styling, and a
+sidebar item restores its width through window state restoration instead of the split
+view's autosave.
+
 ---
 
 ## Phase E — Remove the shims
@@ -252,7 +266,8 @@ author email (now plain `Name <email>`).
 1. ~~Stage All / Commit off `NotificationCenter`~~ — **done in phase C**, as model
    operations on `AppState` rather than responder-chain actions, so they work from any pane.
 2. ~~Delete the notification names~~ — **done in phase C**.
-3. Grep for `import SwiftUI` across `Gitpack/` — expect zero hits.
+3. ~~Grep for `import SwiftUI` across `Gitpack/`~~ — **done in phase D**; zero hits, and
+   `MainSplitViewController`'s hosting-controller helper is gone with it.
 4. Add ←/→ pane focus navigation (`makeFirstResponder` across the three panes) — an M5
    item that is now nearly free.
 5. Update the docs: `ARCHITECTURE.md`'s module layout and concurrency section, `CLAUDE.md`'s

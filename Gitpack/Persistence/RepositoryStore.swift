@@ -1,7 +1,15 @@
 import Foundation
+import Observation
 
 /// Loads and persists the user's repository list to
 /// ~/Library/Application Support/Gitpack/repositories.json.
+///
+/// `@Observable` because `AppState.repositories` is a computed passthrough to
+/// this array — without it, adding or removing a repository is invisible to
+/// anything observing `AppState`. The SwiftUI sidebar only ever refreshed
+/// because add/remove also happened to assign `selectedRepositoryID`, so
+/// removing a repository that wasn't selected left a stale row on screen.
+@Observable
 @MainActor
 final class RepositoryStore {
     private let fileURL: URL
@@ -49,6 +57,14 @@ final class RepositoryStore {
 
     func remove(_ repo: Repository) {
         repositories.removeAll { $0.id == repo.id || $0.parentID == repo.id }
+        save()
+    }
+
+    /// Sidebar drag-reorder. The caller rebuilds the flat array (each top-level
+    /// repository followed by its children) and hands it back whole.
+    func reorder(_ newOrder: [Repository]) {
+        guard newOrder.count == repositories.count else { return }
+        repositories = newOrder
         save()
     }
 

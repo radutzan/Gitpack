@@ -1,5 +1,4 @@
 import AppKit
-import SwiftUI
 
 /// The three-pane shell: sidebar | history | detail.
 ///
@@ -25,13 +24,12 @@ final class MainSplitViewController: NSSplitViewController {
 
         splitView.dividerStyle = .thin
 
-        // A plain item, not `sidebarWithViewController:` — the SwiftUI pane
-        // already draws its own sidebar chrome, and the sidebar item's width
-        // restoration runs through window state restoration rather than the
-        // split view's autosave, which would leave this one divider behaving
-        // differently from the other. Phase D takes the sidebar item when the
-        // pane becomes a real NSOutlineView.
-        let sidebar = NSSplitViewItem(viewController: pane(RepositorySidebar()))
+        // Still a plain item, not `sidebarWithViewController:`. The outline view
+        // draws its own `.sourceList` styling, and a sidebar item restores its
+        // width through window state restoration rather than the split view's
+        // autosave — which would leave this one divider behaving differently
+        // from the other. Revisit only alongside `.fullSizeContentView`.
+        let sidebar = NSSplitViewItem(viewController: SidebarViewController(appState: appState))
         sidebar.minimumThickness = 180
         sidebar.maximumThickness = 320
         sidebar.holdingPriority = NSLayoutConstraint.Priority(261)
@@ -58,15 +56,5 @@ final class MainSplitViewController: NSSplitViewController {
         // makes AppKit restore into an empty split view and then stop recording
         // divider drags — widths come back on launch but every resize is lost.
         splitView.autosaveName = "MainSplit"
-    }
-
-    /// ponytail: panes stay SwiftUI-in-a-hosting-controller until their phase
-    /// migrates them (history → B, detail → C, sidebar → D). `sizingOptions`
-    /// is emptied because a hosting controller that publishes its content size
-    /// fights the split view for the width.
-    private func pane(_ view: some View) -> NSViewController {
-        let controller = NSHostingController(rootView: view.environment(appState))
-        controller.sizingOptions = []
-        return controller
     }
 }

@@ -68,10 +68,9 @@ For the selected repo, the fetch's ref writes land via FSEvents (refs →
 
 ## Module layout
 
-The UI layer is migrating from SwiftUI to AppKit — see
-`docs/plans/2026-07-27-appkit-migration.md`. The shell is AppKit today; the
-three panes are still SwiftUI inside `NSHostingController`s and migrate one
-per phase.
+The UI layer is AppKit throughout — no SwiftUI remains in the target. See
+`docs/plans/2026-07-27-appkit-migration.md` for how it got here and what each
+phase learned.
 
 ```
 Gitpack/
@@ -91,7 +90,7 @@ Gitpack/
 ├── DiffTool/
 │   └── DiffToolService.swift   temp-file plumbing + opendiff invocation
 ├── Features/
-│   ├── Sidebar/RepositorySidebar.swift   SwiftUI until phase D
+│   ├── Sidebar/SidebarViewController.swift  NSOutlineView source list
 │   ├── History/{HistoryViewController,CommitRowView}.swift  NSTableView
 │   ├── Detail/{Detail,WorkingCopy,Commit}ViewController.swift + FileRowView.swift
 │   └── Toolbar/MainToolbar.swift         NSToolbarDelegate
