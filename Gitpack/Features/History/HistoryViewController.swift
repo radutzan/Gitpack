@@ -263,6 +263,7 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
     /// Gitbox's bare-key shortcuts, on the focused list so they can't fire
     /// while you're typing a commit message.
     private func handleBareKey(_ key: String) -> Bool {
+        if movePaneFocus(for: key) { return true }
         guard let vm = appState.selectedViewModel, vm.otherBranch != nil, !vm.isSyncing else {
             return false
         }

@@ -264,6 +264,7 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
     }
 
     private func handleBareKey(_ key: String) -> Bool {
+        if movePaneFocus(for: key) { return true }
         let paths = selectedPaths()
         switch key {
         case "s":

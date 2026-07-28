@@ -16,7 +16,7 @@ final class CommitViewController: NSViewController, NSTableViewDataSource, NSTab
     private var messageZeroHeight: NSLayoutConstraint!
     private let messageDivider = NSBox()
 
-    private let tableView = NSTableView()
+    private let tableView = KeyTableView()
     private let scrollView = NSScrollView()
     private let emptyLabel = NSTextField(labelWithString: "No file changes")
 
@@ -167,6 +167,7 @@ final class CommitViewController: NSViewController, NSTableViewDataSource, NSTab
         tableView.delegate = self
         tableView.target = self
         tableView.doubleAction = #selector(rowDoubleClicked)
+        tableView.onBareKey = { [weak self] key in self?.movePaneFocus(for: key) ?? false }
 
         let menu = NSMenu()
         menu.delegate = self

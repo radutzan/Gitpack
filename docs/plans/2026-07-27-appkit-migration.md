@@ -269,7 +269,12 @@ view's autosave.
 3. ~~Grep for `import SwiftUI` across `Gitpack/`~~ — **done in phase D**; zero hits, and
    `MainSplitViewController`'s hosting-controller helper is gone with it.
 4. Add ←/→ pane focus navigation (`makeFirstResponder` across the three panes) — an M5
-   item that is now nearly free.
+   item that is now nearly free. Both key views route arrows through
+   `NSViewController.movePaneFocus(for:)`; the target pane's first `NSTableView` is found
+   by search, so no pane has to conform to anything. **Trap:** "unmodified keypress" cannot
+   mean `deviceIndependentFlagsMask.isEmpty` — the arrow keys always carry `.function` and
+   `.numericPad`, so that test silently swallowed every one of them. Check only for the
+   modifiers a user actually holds, which also leaves ⇧← extending a selection.
 5. Update the docs: `ARCHITECTURE.md`'s module layout and concurrency section, `CLAUDE.md`'s
    "AppKit escape hatch" convention (now "AppKit, full stop") and the SwiftUI-specific traps
    (fixed row heights and the conditional `refreshAll` assignment both still apply and must

@@ -39,13 +39,13 @@ Gitbox's identity: "see all your repositories at a glance." Requires an architec
 - Fetch triggered on typing a commit message (Gitbox's trick so you can pull before committing).
 - Sidebar numeric badges = unpushed + unmerged + stage-change count; inline spinner during fetch/pull.
 - New remote commits appear live with blue dots when the repo is selected.
-- Sidebar drag-reorder.
+- ~~Sidebar drag-reorder.~~ **Done 2026-07-27** — fell out of `NSOutlineView`'s drag API during the AppKit migration.
 
 ## Milestone 3 — Live history search
 
 Gitbox's signature feature. ⌘F / toolbar field streams `git log -p` and filters live — no index.
 
-- **First task: migrate the history list to `NSTableView` (`NSViewRepresentable`).** Search stresses exactly what SwiftUI's List bridge is weakest at: streaming mutations, per-row substring highlighting, 10k+ rows, stable selection through constant filtering. Decided 2026-07-13 after the NavigationSplitView/HSplitView layout failures showed the SwiftUI↔AppKit bridge layer is where this app breaks; build the search UI once, on the real control. Keep the row design (two-line, dots, fixed height) and the manual width-persistence pattern from ContentView.
+- ~~**First task: migrate the history list to `NSTableView`.**~~ **Done 2026-07-27**, and it grew: the whole UI was rewritten in AppKit rather than just this list (`docs/plans/2026-07-27-appkit-migration.md`). Search now builds directly on `HistoryViewController`'s `NSTableView` — uniform 45pt rows, no bridge layer, and the reload/selection/scroll discipline it needs is already in place.
 - Matches commit metadata (author, SHA, date), file paths, and **added/removed diff lines**; space-separated tokens AND together; quoted phrases match exact case.
 - Yellow highlight of matched substrings in history rows, file lists, and message text.
 - Thin results bar atop the history list: live count ("152 commits") + progress spinner; Esc cancels the stream.
@@ -71,7 +71,7 @@ Breadth. Toolbar branch popup grows Gitbox's full menu; the commit context menu 
 - Commit message field: ⌘↑/⌘↓ browse previous messages from history; ⌘↩ commit; ⌘⇧↩ Stage All.
 - Color labels: 7-color right-click picker on commits, colored corner marker on rows, persisted locally per repo (Gitbox's "visual bisect").
 - Quick Look (space) on any file in any commit; drag files out; Extract File… (save a historical version).
-- Keyboard pane navigation: ←/→ move focus across the three panes.
+- ~~Keyboard pane navigation: ←/→ move focus across the three panes.~~ **Done 2026-07-27** — nearly free once the panes were AppKit.
 - File menu: Clone Repository… (URL, progress, remembers last URL), New Repository… (`git init` offer on non-repo folders), Open Repository…, Open Recent; drop folder on Dock icon.
 - Repository menu: Open in Finder / Open in Terminal / Open Xcode Project; Optimize Repository (`git gc`).
 - Activity window (⌘0): live list of git commands Gitpack runs + their output.
@@ -86,4 +86,4 @@ M1 before M2 because badges/dots are defined by the comparison model. M3 (search
 
 - Every new operation goes through the `GitService` protocol (CLI backend, NUL-terminated parsing — see `ARCHITECTURE.md`).
 - Parser tests (promised since v0.1) should land with M1 — the rev-list/ref parsing added there is exactly the fragile kind.
-- History list moves to `NSTableView` at the start of M3 (see M3 first task) — no longer conditional. Elsewhere the rule is: SwiftUI by default; when a component fights back on layout, focus, or performance fundamentals, wrap the AppKit original instead of stacking workarounds (see ContentView's custom split dividers for the pattern).
+- The UI is AppKit throughout as of 2026-07-27 — there is no SwiftUI left in the target and none should return. See `docs/plans/2026-07-27-appkit-migration.md` and the traps recorded in `CLAUDE.md`.

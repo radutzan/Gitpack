@@ -105,7 +105,7 @@ The Xcode project uses `PBXFileSystemSynchronizedRootGroup` — files dropped un
 
 ## Concurrency
 
-- The build defaults to `default-isolation = MainActor`. SwiftUI views, `AppState`, `RepositoryStore`, and `RepositoryViewModel` all live on the main actor by default.
+- The build defaults to `default-isolation = MainActor`. View controllers, `AppState`, `RepositoryStore`, and `RepositoryViewModel` all live on the main actor by default.
 - `CLIGitService` is an `actor` so all git calls run off the main thread.
 - The `GitService` protocol is `nonisolated` so conformers don't accidentally inherit MainActor isolation.
 - `DiffToolService` is also an `actor`.
@@ -125,12 +125,12 @@ The selected repository's directory tree is watched live via FSEvents (`Git/File
 
 - **`FileSystemWatcher`** is a `nonisolated` wrapper around `FSEventStreamCreate` (recursive, file-level, `NoDefer`). Events are delivered on a private serial queue; `stop()` flushes in-flight callbacks before tearing the stream down.
 - **`GitChangeClassifier`** maps a batch of changed paths to the coarsest refresh they warrant: ref/`HEAD`/reflog/`packed-refs` changes → `.full` (commit graph or branches moved); working-tree or `.git/index` changes → `.status` (cheap, no list flicker); loose objects, `*.lock`, `FETCH_HEAD` → `.none` (noise).
-- **`AppState`** owns the watcher, re-targeting it whenever the selection changes (driven by `ContentView`'s `.task(id:)`). Event batches are debounced (350ms) and coalesced via `WatchRefreshKind.combined` so a burst of saves or a multi-ref git write triggers one refresh once the filesystem settles. Stale callbacks from a replaced watcher are dropped by repository-ID check.
+- **`AppState`** owns the watcher, re-targeting it whenever the selection changes (driven by `AppDelegate`'s observation of `selectedRepositoryID`). Event batches are debounced (350ms) and coalesced via `WatchRefreshKind.combined` so a burst of saves or a multi-ref git write triggers one refresh once the filesystem settles. Stale callbacks from a replaced watcher are dropped by repository-ID check.
 
 Refresh triggers, in order of granularity:
 
 - **FSEvents** — automatic, debounced; `.status` or `.full` per the classifier above.
-- **Foreground activation** — `ContentView` awaits `NSApplication.didBecomeActiveNotification` (async `NotificationCenter` sequence, no Combine) and runs `AppState.foregroundRefresh()` (a full reload), a safety net for any events coalesced or missed while inactive.
+- **Foreground activation** — `AppDelegate.applicationDidBecomeActive` runs `AppState.foregroundRefresh()` (a full reload), a safety net for any events coalesced or missed while inactive.
 - **Mutations** — `commit`, `stage`, `push`, etc. still refresh synchronously for immediate feedback; the watcher is redundant-but-harmless here.
 - **Manual** — `refreshable` pull-to-refresh on the history list.
 

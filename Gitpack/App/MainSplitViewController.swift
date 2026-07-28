@@ -57,4 +57,25 @@ final class MainSplitViewController: NSSplitViewController {
         // divider drags — widths come back on launch but every resize is lost.
         splitView.autosaveName = "MainSplit"
     }
+
+    /// Moves keyboard focus one pane left or right. The target is the pane's
+    /// first table view, found by search rather than by a protocol every pane
+    /// would have to conform to — and it lands on the file list rather than the
+    /// commit composer, which is what you want when arrowing between panes.
+    func focusPane(adjacentTo pane: NSViewController, offset: Int) {
+        guard let index = splitViewItems.firstIndex(where: { $0.viewController === pane }) else { return }
+        let target = index + offset
+        guard splitViewItems.indices.contains(target),
+              let responder = firstTableView(in: splitViewItems[target].viewController.view)
+        else { return }
+        view.window?.makeFirstResponder(responder)
+    }
+
+    private func firstTableView(in view: NSView) -> NSTableView? {
+        if let table = view as? NSTableView { return table }
+        for subview in view.subviews {
+            if let found = firstTableView(in: subview) { return found }
+        }
+        return nil
+    }
 }

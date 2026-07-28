@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A minimalist macOS Git client, clean-room successor to Gitbox 1.6.3. SwiftUI + AppKit, no dependencies, no test target — the whole app shells out to `/usr/bin/git`.
+A minimalist macOS Git client, clean-room successor to Gitbox 1.6.3. Pure AppKit, no dependencies, no test target — the whole app shells out to `/usr/bin/git`.
 
 Docs, in order of authority for scope: `docs/plans/2026-07-06-gitbox-replica-roadmap.md` (current scope, supersedes spec §3) → `ARCHITECTURE.md` (design decisions and rationale — read it before non-trivial work) → `Gitpack-Spec.md` (original v0.1 spec, largely historical).
 
@@ -38,7 +38,7 @@ Layering is `App/` (shell) + `Features/` (panes) → `AppState` → `GitService`
 - **Never add interactive auth.** All git runs with `GIT_TERMINAL_PROMPT=0` and `GIT_ASKPASS`/`SSH_ASKPASS` at `/usr/bin/false` so background fetch fails fast instead of hanging. Credentials, signing, hooks are the user's terminal config, by design.
 - **History rows need explicit fixed heights** — `tableView.rowHeight = 45` (41pt of content + 2pt above and below), never `usesAutomaticRowHeights`. With automatic heights, NSTableView's estimates for unmaterialized rows diverge from measured two-line rows and scroll-to-row blanks the pane. A uniform height is also what makes M3's streaming search viable.
 - **`refreshAll` assigns conditionally** (`if fresh != commits`). It runs on every activation and autofetch; unconditional assignment rebuilds the table mid-click and drops selection.
-- **The UI is AppKit.** There is no SwiftUI left in the target — `grep -r "import SwiftUI" Gitpack/` returns nothing, and it should stay that way. The migration is `docs/plans/2026-07-27-appkit-migration.md`; phases A–D are done, E is ←/→ pane focus navigation plus a doc pass. Do not reintroduce SwiftUI, and especially not as a wrapper around an AppKit control — that bridge direction is what failed.
+- **The UI is AppKit.** There is no SwiftUI left in the target — `grep -r "import SwiftUI" Gitpack/` returns nothing, and it should stay that way. `docs/plans/2026-07-27-appkit-migration.md` records how it got here and what each phase cost. Do not reintroduce SwiftUI, and especially not as a wrapper around an AppKit control — that bridge direction is what failed.
 - **Inside an `observeChanges` body, read the observable state up front** — never only inside a loop over materialized table cells. Right after `reloadData` no cell views exist yet, so such a loop reads nothing, registers no dependency, and that state never updates again. `SidebarViewController.refreshVisibleCells` reads every repository's badge into a dictionary first, then applies it to whatever cells happen to exist; the badges silently never appeared until it did.
 - **A separator `NSBox` has no intrinsic height.** Pin it to 1pt. Left unpinned it is free to absorb the whole pane, and the views below it get squeezed to nothing — that is what pushed the detail pane's file list off the bottom of the window the first time it ran.
 - **The history table reloads only when its rows actually differ,** and restores the scroll offset and selection afterwards without scrolling. `HistoryViewController` scrolls to the selection only when the *model's* selection moved — restoring it after a reload would yank you to the top the moment you page in 200 more commits.

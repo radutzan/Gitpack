@@ -19,7 +19,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     private let appState: AppState
-    private let outlineView = NSOutlineView()
+    private let outlineView = KeyOutlineView()
     private let scrollView = NSScrollView()
 
     private let root = Node(repository: nil)
@@ -53,6 +53,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         outlineView.allowsEmptySelection = true
         outlineView.dataSource = self
         outlineView.delegate = self
+        outlineView.onBareKey = { [weak self] key in self?.movePaneFocus(for: key) ?? false }
 
         let menu = NSMenu()
         menu.delegate = self

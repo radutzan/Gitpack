@@ -152,8 +152,9 @@ A developer who:
 
 **Use whatever modern SwiftUI APIs require.** Prefer the newest macOS that's reasonable to ship against today. If a feature genuinely requires falling back to AppKit (e.g., `NSTableView` for the commit list if SwiftUI's `Table` proves too slow with thousands of rows), that's acceptable — wrap it cleanly.
 
-> Shipped target: macOS 15.7. The AppKit fallback stopped being hypothetical — see
-> §8.4 and the roadmap's standing technical notes.
+> Shipped target: macOS 15.7. The AppKit fallback stopped being hypothetical, and then
+> stopped being a fallback — the UI is entirely AppKit as of 2026-07-27. See §6.1, §8.4,
+> and `docs/plans/2026-07-27-appkit-migration.md`.
 
 Do not bend over backward to support older macOS versions. This is a fresh start.
 
@@ -166,6 +167,12 @@ Do not bend over backward to support older macOS versions. This is a fresh start
 - SwiftUI as the primary UI layer.
 - AppKit interop where SwiftUI is insufficient (likely: large list performance, fine-grained text rendering for commit messages).
 - Swift Concurrency (`async/await`, actors) for all git operations — never block the main thread on git work.
+
+> **Reversed 2026-07-27.** The UI is pure AppKit; there is no SwiftUI left in the target.
+> "Interop where SwiftUI is insufficient" turned out to describe most of the app —
+> splitters, focus, menu validation, table streaming — and the SwiftUI↔AppKit bridge was
+> itself the source of the worst bugs. See `docs/plans/2026-07-27-appkit-migration.md`.
+> Swift Concurrency and the actor-isolated git layer are unchanged.
 
 ### 6.2 Git backend — recommendation requested
 
@@ -288,7 +295,7 @@ Models should be value types (`struct Commit`, `struct FileChange`, `struct Repo
    → **`NSTableView` is required, decided 2026-07-13.** Not for row count but for
    streaming mutations, per-row highlighting and stable selection under live search;
    SwiftUI's List bridge also caused the layout failures behind the custom split
-   dividers. The migration is M3's first task, unconditional.
+   dividers. **Superseded 2026-07-27:** the whole UI moved to AppKit, not just this list.
 5. **Sandbox**: stay un-sandboxed for v0.1 — confirm or push back.
    → **Confirmed off**, hardened runtime on. Not a Mac App Store target.
 
