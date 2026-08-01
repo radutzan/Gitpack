@@ -102,6 +102,52 @@ struct CommitSearchPage: Sendable {
     let scanned: Int
 }
 
+/// A tag and the commit it ultimately points at. An annotated tag points at a
+/// tag object, so `targetSHA` is the *peeled* value — that's what history rows
+/// have to match on.
+struct Tag: Identifiable, Hashable, Sendable {
+    var id: String { name }
+    let name: String
+    let targetSHA: String
+}
+
+/// One entry of `git stash list`. The ref is carried verbatim so apply and drop
+/// never have to rebuild `stash@{n}` out of an index.
+struct Stash: Identifiable, Hashable, Sendable {
+    var id: String { ref }
+    let ref: String
+    let message: String
+    let date: Date
+}
+
+/// A git operation left half-finished in the working copy — the only "mode"
+/// Gitpack has, and the only time the stage pane grows buttons. Raw values are
+/// the git subcommand itself, so abort/skip/continue is one call for all four.
+enum RepositoryOperation: String, Sendable {
+    case rebase
+    case merge
+    case cherryPick = "cherry-pick"
+    case revert
+
+    var label: String {
+        switch self {
+        case .rebase: "Rebase"
+        case .merge: "Merge"
+        case .cherryPick: "Cherry-pick"
+        case .revert: "Revert"
+        }
+    }
+
+    /// `git merge` has no `--skip`.
+    var canSkip: Bool { self != .merge }
+}
+
+enum OperationAction: String, Sendable {
+    case abort
+    case skip
+    case `continue`
+}
+
 /// The commit-set difference between the current branch and its "other branch"
 /// (Gitbox's comparison target — a remote tracking branch or another local branch).
 struct Divergence: Hashable, Sendable {

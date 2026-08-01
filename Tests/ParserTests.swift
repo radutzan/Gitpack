@@ -22,6 +22,44 @@ struct ParserTests {
         testChangeClassifier()
         testSearchQuery()
         testSearchLog()
+        testTags()
+        testStashes()
+    }
+
+    // MARK: - Tags and stashes
+
+    static func testTags() {
+        // git for-each-ref --sort=-version:refname
+        //   --format='%(refname:short)%1f%(objectname)%1f%(*objectname)%00' refs/tags
+        // v1.10.0 is annotated (its own object, then the peeled commit);
+        // v1.9.0 is lightweight, so the peeled field is empty.
+        let fixture = "v1.10.0\u{1F}3a5c22002945deb6c74e8f2bb5426a119037f533"
+            + "\u{1F}8725446dee534a3f7dcce51c4c62911c44c0370b\u{00}\n"
+            + "v1.9.0\u{1F}cc2e1d6fb4de25ff3dfa9481e90e6cb27a2fe039\u{1F}\u{00}\n"
+        let tags = TagParser.parse(fixture)
+        check(tags.count == 2, "tags: two records")
+        check(tags.map(\.name) == ["v1.10.0", "v1.9.0"], "tags: git's own version sort is kept")
+        check(
+            tags[0].targetSHA == "8725446dee534a3f7dcce51c4c62911c44c0370b",
+            "tags: annotated tag resolves to the peeled commit"
+        )
+        check(
+            tags[1].targetSHA == "cc2e1d6fb4de25ff3dfa9481e90e6cb27a2fe039",
+            "tags: lightweight tag resolves to its own object"
+        )
+        check(TagParser.parse("").isEmpty, "tags: no tags")
+    }
+
+    static func testStashes() {
+        // git stash list --format='%gd%x1f%gs%x1f%aI%x00'
+        let fixture = "stash@{0}\u{1F}On main: a.txt tweak\u{1F}2026-08-01T14:17:33-07:00\u{00}\n"
+            + "stash@{1}\u{1F}On main: b.txt work\u{1F}2026-08-01T14:17:32-07:00\u{00}\n"
+        let stashes = StashParser.parse(fixture)
+        check(stashes.count == 2, "stashes: two records")
+        check(stashes[0].ref == "stash@{0}", "stashes: reflog selector kept verbatim")
+        check(stashes[1].message == "On main: b.txt work", "stashes: message")
+        check(stashes[0].date > stashes[1].date, "stashes: newest first")
+        check(StashParser.parse("").isEmpty, "stashes: no stashes")
     }
 
     // MARK: - SearchQuery

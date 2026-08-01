@@ -8,12 +8,14 @@ import AppKit
 /// view controller. That chain is what replaces SwiftUI's `.disabled(…)`
 /// recomputation.
 enum MainMenu {
-    static func build() -> NSMenu {
+    /// `stashDelegate` fills the Apply Stash submenu on demand — the stash list
+    /// changes under the app, so the items can't be built once at launch.
+    static func build(stashDelegate: NSMenuDelegate) -> NSMenu {
         let main = NSMenu()
         main.addItem(submenu(appMenu(), title: "Gitpack"))
         main.addItem(submenu(fileMenu(), title: "File"))
         main.addItem(submenu(editMenu(), title: "Edit"))
-        main.addItem(submenu(repositoryMenu(), title: "Repository"))
+        main.addItem(submenu(repositoryMenu(stashDelegate: stashDelegate), title: "Repository"))
         main.addItem(submenu(stageMenu(), title: "Stage"))
         main.addItem(submenu(windowMenu(), title: "Window"))
         return main
@@ -66,7 +68,7 @@ enum MainMenu {
         return menu
     }
 
-    private static func repositoryMenu() -> NSMenu {
+    private static func repositoryMenu(stashDelegate: NSMenuDelegate) -> NSMenu {
         let menu = NSMenu()
         // Title flips to "Merge" in validateMenuItem when the other branch is
         // local. Bare-key `u`/`p` stay on the focused list (a bare key in the
@@ -80,6 +82,29 @@ enum MainMenu {
         let forcePush = menu.addItem(withTitle: "Force Push", action: #selector(AppDelegate.forcePush(_:)), keyEquivalent: "p")
         forcePush.keyEquivalentModifierMask = [.command, .shift]
         menu.addItem(.separator())
+
+        let quick = menu.addItem(
+            withTitle: "Quick Checkout…",
+            action: #selector(AppDelegate.quickCheckout(_:)),
+            keyEquivalent: "c"
+        )
+        quick.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(withTitle: "New Branch…", action: #selector(AppDelegate.newBranch(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "New Tag…", action: #selector(AppDelegate.newTag(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
+
+        menu.addItem(withTitle: "Stash Changes…", action: #selector(AppDelegate.stashChanges(_:)), keyEquivalent: "")
+        let applyStash = menu.addItem(withTitle: "Apply Stash", action: nil, keyEquivalent: "")
+        let stashes = NSMenu(title: "Apply Stash")
+        stashes.delegate = stashDelegate
+        applyStash.submenu = stashes
+        menu.addItem(
+            withTitle: "Remove All Stashes…",
+            action: #selector(AppDelegate.removeStashes(_:)),
+            keyEquivalent: ""
+        )
+        menu.addItem(.separator())
+
         // Validated by whichever file list has focus (that's where the selected
         // path lives), so it greys out from anywhere else.
         menu.addItem(
@@ -88,6 +113,11 @@ enum MainMenu {
             keyEquivalent: "d"
         )
         menu.addItem(.separator())
+        menu.addItem(
+            withTitle: "Repository Settings…",
+            action: #selector(AppDelegate.showRepositorySettings(_:)),
+            keyEquivalent: "i"
+        )
         menu.addItem(withTitle: "Open in Finder", action: #selector(AppDelegate.openInFinder(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Open in Terminal", action: #selector(AppDelegate.openInTerminal(_:)), keyEquivalent: "")
         return menu

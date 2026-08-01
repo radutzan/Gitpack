@@ -48,6 +48,16 @@ actor CLIGitService: GitService {
             }
     }
 
+    func tags(at url: URL) async throws -> [Tag] {
+        // `version:refname` is git's own natural version ordering — v1.10 after
+        // v1.9, not before it — reversed so the newest tag leads.
+        let result = try await runGit([
+            "for-each-ref", "--sort=-version:refname",
+            "--format=\(TagParser.format)", "refs/tags"
+        ], at: url)
+        return TagParser.parse(result.stdoutString)
+    }
+
     func remotes(at url: URL) async throws -> [Remote] {
         let result = try await runGit(["remote", "-v"], at: url)
         var seen = Set<String>()
@@ -67,13 +77,16 @@ actor CLIGitService: GitService {
     func remoteBranches(at url: URL) async throws -> [String] {
         let result = try await runGit([
             "for-each-ref",
-            "--format=%(refname:short)",
+            "--format=%(refname)",
             "refs/remotes"
         ], at: url)
         return result.stdoutString
             .split(separator: "\n", omittingEmptySubsequences: true)
-            .map(String.init)
+            // Filtered on the full ref: `refs/remotes/origin/HEAD` shortens to
+            // plain "origin", so filtering short names for a "/HEAD" suffix let
+            // that symbolic ref through and listed a bare remote as a branch.
             .filter { !$0.hasSuffix("/HEAD") }
+            .map { String($0.dropFirst("refs/remotes/".count)) }
     }
 
     // MARK: - Status
@@ -83,6 +96,33 @@ actor CLIGitService: GitService {
             "status", "--porcelain=v2", "--branch", "-z"
         ], at: url)
         return PorcelainV2Parser.parse(result.stdout)
+    }
+
+    /// Four `stat`s rather than a `git rev-parse --git-path` process: this is
+    /// asked on every status refresh, and FSEvents fires a lot.
+    func operation(at url: URL) async -> RepositoryOperation? {
+        let gitDir = gitDirectory(for: url)
+        func exists(_ name: String) -> Bool {
+            FileManager.default.fileExists(atPath: gitDir.appendingPathComponent(name).path)
+        }
+        if exists("rebase-merge") || exists("rebase-apply") { return .rebase }
+        if exists("MERGE_HEAD") { return .merge }
+        if exists("CHERRY_PICK_HEAD") { return .cherryPick }
+        if exists("REVERT_HEAD") { return .revert }
+        return nil
+    }
+
+    /// `.git` is a directory in an ordinary clone and a file holding
+    /// `gitdir: <path>` in a linked worktree or a submodule.
+    private func gitDirectory(for url: URL) -> URL {
+        let dotGit = url.appendingPathComponent(".git")
+        guard let contents = try? String(contentsOf: dotGit, encoding: .utf8),
+              let line = contents.split(separator: "\n").first,
+              line.hasPrefix("gitdir: ") else { return dotGit }
+        let path = String(line.dropFirst("gitdir: ".count)).trimmingCharacters(in: .whitespaces)
+        return path.hasPrefix("/")
+            ? URL(fileURLWithPath: path)
+            : url.appendingPathComponent(path).standardizedFileURL
     }
 
     // MARK: - Log
@@ -188,6 +228,90 @@ actor CLIGitService: GitService {
         _ = try await runGit(["commit", "-F", "-"], at: url, stdin: Data(trimmed.utf8))
     }
 
+    // MARK: - Stash
+
+    func stashes(at url: URL) async throws -> [Stash] {
+        let result = try await runGit(["stash", "list", "--format=\(StashParser.format)"], at: url)
+        return StashParser.parse(result.stdoutString)
+    }
+
+    func stashPush(message: String?, at url: URL) async throws {
+        // -u: a stash that leaves new files behind isn't a clean slate, and
+        // Gitbox's Stash Changes took untracked files too.
+        var args = ["stash", "push", "-u"]
+        if let message, !message.isEmpty {
+            args.append(contentsOf: ["-m", message])
+        }
+        _ = try await runGit(args, at: url)
+    }
+
+    func stashApply(ref: String, at url: URL) async throws {
+        // Apply, not pop: the stash stays until it is explicitly removed, so a
+        // conflicting apply can't lose it.
+        _ = try await runGit(["stash", "apply", ref], at: url)
+    }
+
+    func stashClear(at url: URL) async throws {
+        _ = try await runGit(["stash", "clear"], at: url)
+    }
+
+    // MARK: - Branches, tags, remotes
+
+    func createBranch(name: String, from ref: String, checkout: Bool, at url: URL) async throws {
+        _ = try await runGit(checkout ? ["checkout", "-b", name, ref] : ["branch", name, ref], at: url)
+    }
+
+    func deleteBranch(name: String, force: Bool, at url: URL) async throws {
+        _ = try await runGit(["branch", force ? "-D" : "-d", name], at: url)
+    }
+
+    func deleteRemoteBranch(remote: String, branch: String, at url: URL) async throws {
+        _ = try await runGit(["push", remote, "--delete", branch], at: url)
+    }
+
+    func createTag(name: String, message: String?, ref: String, at url: URL) async throws {
+        // Always annotated. `git push --follow-tags` only carries annotated tags,
+        // and that is what makes "tags push with the branch" free.
+        _ = try await runGit(["tag", "-a", "-m", message ?? name, name, ref], at: url)
+    }
+
+    func deleteTag(name: String, at url: URL) async throws {
+        _ = try await runGit(["tag", "-d", name], at: url)
+    }
+
+    func addRemote(name: String, remoteURL: String, at url: URL) async throws {
+        _ = try await runGit(["remote", "add", name, remoteURL], at: url)
+    }
+
+    func removeRemote(name: String, at url: URL) async throws {
+        _ = try await runGit(["remote", "remove", name], at: url)
+    }
+
+    // MARK: - History operations
+
+    func cherryPick(sha: String, commit: Bool, at url: URL) async throws {
+        var args = ["cherry-pick"]
+        if !commit { args.append("--no-commit") }
+        args.append(sha)
+        _ = try await runGit(args, at: url)
+    }
+
+    func revert(sha: String, at url: URL) async throws {
+        _ = try await runGit(["revert", "--no-edit", sha], at: url)
+    }
+
+    func reset(to ref: String, at url: URL) async throws {
+        _ = try await runGit(["reset", "--hard", ref], at: url)
+    }
+
+    func resolveOperation(
+        _ operation: RepositoryOperation,
+        _ action: OperationAction,
+        at url: URL
+    ) async throws {
+        _ = try await runGit([operation.rawValue, "--\(action.rawValue)"], at: url)
+    }
+
     // MARK: - Network
 
     func fetch(at url: URL) async throws {
@@ -203,7 +327,9 @@ actor CLIGitService: GitService {
     }
 
     func push(remote: String?, refspec: String?, force: Bool, at url: URL) async throws {
-        var args = ["push"]
+        // --follow-tags carries the annotated tags reachable from what's being
+        // pushed, which is Gitbox's "tags push with the branch".
+        var args = ["push", "--follow-tags"]
         if force { args.append("--force") }
         if let remote, let refspec {
             args.append(remote)
@@ -212,12 +338,21 @@ actor CLIGitService: GitService {
         _ = try await runGit(args, at: url)
     }
 
-    func merge(branch: String, at url: URL) async throws {
-        _ = try await runGit(["merge", branch], at: url)
+    func merge(ref: String, at url: URL) async throws {
+        _ = try await runGit(["merge", ref], at: url)
     }
 
-    func checkout(branch: String, at url: URL) async throws {
-        _ = try await runGit(["checkout", branch], at: url)
+    func checkout(ref: String, at url: URL) async throws {
+        _ = try await runGit(["checkout", ref], at: url)
+    }
+
+    func checkoutTracking(remoteBranch: String, at url: URL) async throws {
+        let result = try await runGit(["checkout", "--track", remoteBranch], at: url, throwOnFailure: false)
+        guard result.exitCode != 0 else { return }
+        // A local branch of that name already exists — which is the common case
+        // once you've checked it out before. Switch to it instead.
+        let local = remoteBranch.split(separator: "/").dropFirst().joined(separator: "/")
+        _ = try await runGit(["checkout", local], at: url)
     }
 
     func setUpstream(branch: String, upstream: String, at url: URL) async throws {
@@ -251,6 +386,10 @@ actor CLIGitService: GitService {
         // (background autofetch must be silent; interactive auth is out of scope).
         env["GIT_ASKPASS"] = "/usr/bin/false"
         env["SSH_ASKPASS"] = "/usr/bin/false"
+        // Same reason: `rebase --continue`, `merge` and `revert` would otherwise
+        // launch $EDITOR and wait forever. `true` accepts the message git
+        // already prepared, which is what a GUI wants anyway.
+        env["GIT_EDITOR"] = "/usr/bin/true"
 
         let result = try await ProcessRunner.run(
             executable: executable,

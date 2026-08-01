@@ -62,6 +62,23 @@ final class MainWindowController: NSWindowController {
         mainToolbar.beginSearch()
     }
 
+    func showQuickCheckout() {
+        present(QuickCheckoutController(appState: appState))
+    }
+
+    func showRepositorySettings() {
+        present(RepositorySettingsController(appState: appState))
+    }
+
+    /// One sheet at a time: ⌘I from inside Quick Checkout would otherwise stack
+    /// a second sheet on the first and strand both.
+    private func present(_ sheet: NSViewController) {
+        guard appState.selectedRepository != nil,
+              let content = window?.contentViewController,
+              content.presentedViewControllers?.isEmpty != false else { return }
+        content.presentAsSheet(sheet)
+    }
+
     private func updateTitle() {
         guard let window else { return }
         guard let repo = appState.selectedRepository else {

@@ -63,6 +63,22 @@ final class RepositoryViewModel {
     var currentBranch: String?
     var remoteBranches: [String] = []
     var remotes: [Remote] = []
+    var stashes: [Stash] = []
+    /// The half-finished rebase/merge/cherry-pick/revert the working copy is in,
+    /// if any — what the stage pane's Abort/Skip/Continue row hangs off.
+    var operation: RepositoryOperation?
+    var tags: [Tag] = [] {
+        // Indexed once per change rather than searched per row: history rows ask
+        // for a commit's tags on every cell that scrolls past.
+        didSet {
+            tagNames = Dictionary(grouping: tags, by: \.targetSHA)
+                .mapValues { $0.map(\.name) }
+        }
+    }
+    private(set) var tagNames: [String: [String]] = [:]
+
+    func tags(for sha: String) -> [String] { tagNames[sha] ?? [] }
+
     var divergence: Divergence?
     var selection: HistoryItem?
     var commitFiles: [String: [CommitFileChange]] = [:]
@@ -91,9 +107,9 @@ final class RepositoryViewModel {
     /// Runs a git call and funnels either flavour of failure into `lastError`.
     /// Every call site used to repeat the same two-clause catch.
     @discardableResult
-    func run(_ operation: () async throws -> Void) async -> Bool {
+    func run(_ body: () async throws -> Void) async -> Bool {
         do {
-            try await operation()
+            try await body()
             return true
         } catch let error as GitError {
             lastError = error.description
@@ -102,6 +118,14 @@ final class RepositoryViewModel {
             lastError = error.localizedDescription
             return false
         }
+    }
+
+    /// Run a mutation, then reload. The refresh runs even when the call failed:
+    /// a conflicted merge or cherry-pick exits non-zero and *still* leaves the
+    /// working copy in a state the panes have to show.
+    func perform(using git: GitService, _ body: () async throws -> Void) async {
+        await run(body)
+        await refreshAll(using: git)
     }
 
     private let pageSize = 200
@@ -256,11 +280,18 @@ final class RepositoryViewModel {
             async let branchesTask = git.branches(at: url)
             async let remoteBranchesTask = git.remoteBranches(at: url)
             async let remotesTask = git.remotes(at: url)
+            async let tagsTask = git.tags(at: url)
+            async let stashesTask = git.stashes(at: url)
+            async let operationTask = git.operation(at: url)
 
             let status = try await statusTask
             let branches = try await branchesTask
             let remoteBranches = try await remoteBranchesTask
             let remotes = try await remotesTask
+            let tags = try await tagsTask
+            let stashes = try await stashesTask
+            let previousOperation = operation
+            self.operation = await operationTask
 
             // Only assign what actually changed. refreshAll runs on every app
             // activation and after every autofetch; unconditional assignment —
@@ -270,6 +301,8 @@ final class RepositoryViewModel {
             if branches != self.branches { self.branches = branches }
             if remoteBranches != self.remoteBranches { self.remoteBranches = remoteBranches }
             if remotes != self.remotes { self.remotes = remotes }
+            if tags != self.tags { self.tags = tags }
+            if stashes != self.stashes { self.stashes = stashes }
             self.currentBranch = status.branch ?? branches.first(where: \.isCurrent)?.name
             onStatusChanged?(status)
 
@@ -298,6 +331,12 @@ final class RepositoryViewModel {
                     selection = .commit(first.id)
                 }
             }
+            // An operation that just stopped half-way puts its Abort/Skip/
+            // Continue row in the stage pane, so move there — otherwise the way
+            // out of the mode is behind a click you don't know to make.
+            if operation != nil, previousOperation == nil {
+                selection = .workingCopy
+            }
             lastError = nil
         } catch let error as GitError {
             lastError = error.description
@@ -311,6 +350,10 @@ final class RepositoryViewModel {
         do {
             let status = try await git.workingCopyStatus(at: url)
             self.status = status
+            // Cheap (four `stat`s) and it has to be here as well as in
+            // refreshAll: a conflict resolved by editing files on disk only ever
+            // produces a `.status` refresh.
+            self.operation = await git.operation(at: url)
             onStatusChanged?(status)
             if let currentSelection = selection, case .workingCopy = currentSelection, status.isClean {
                 // Drop to first commit if WC went clean.
@@ -363,7 +406,7 @@ final class RepositoryViewModel {
                 try await git.pullRebase(at: repository.url)
             case .merge:
                 guard let other = otherBranch else { return }
-                try await git.merge(branch: other, at: repository.url)
+                try await git.merge(ref: other, at: repository.url)
             case .push, .forcePush:
                 let (remote, refspec) = pushTarget
                 try await git.push(

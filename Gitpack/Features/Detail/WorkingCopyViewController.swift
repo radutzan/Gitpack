@@ -3,7 +3,10 @@ import AppKit
 /// Commit composer over the staging list.
 final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSTextViewDelegate, NSMenuDelegate, NSMenuItemValidation {
     private let appState: AppState
+    private lazy var actions = RepositoryActions(appState: appState)
 
+    private let operationBar = OperationBarView()
+    private var operationBarHeight: NSLayoutConstraint!
     private let composerBox = NSBox()
     private let composer = ComposerTextView()
     private let composerPlaceholder = NSTextField(labelWithString: "Commit message")
@@ -44,17 +47,30 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
         let divider = NSBox()
         divider.boxType = .separator
 
-        for subview in [composerBox, buttonRow, divider, scrollView, emptyLabel] as [NSView] {
+        operationBar.onAction = { [weak self] action in
+            guard let operation = self?.vm?.operation else { return }
+            self?.actions.resolve(operation, action)
+        }
+
+        for subview in [operationBar, composerBox, buttonRow, divider, scrollView, emptyLabel] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
 
         composerHeight = composerBox.heightAnchor.constraint(equalToConstant: Composer.collapsedHeight)
+        // Zero-height rather than a second set of constraints: with the bar
+        // collapsed the composer sits exactly where it did before it existed.
+        operationBarHeight = operationBar.heightAnchor.constraint(equalToConstant: 0)
 
         NSLayoutConstraint.activate([
+            operationBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            operationBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            operationBar.topAnchor.constraint(equalTo: view.topAnchor),
+            operationBarHeight,
+
             composerBox.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
             composerBox.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            composerBox.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
+            composerBox.topAnchor.constraint(equalTo: operationBar.bottomAnchor, constant: 10),
             composerHeight,
 
             buttonRow.leadingAnchor.constraint(equalTo: composerBox.leadingAnchor),
@@ -192,6 +208,15 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
         }
         emptyLabel.isHidden = !entries.isEmpty
 
+        // The one "mode" this app has: a rebase, merge, cherry-pick or revert
+        // that stopped half-way and needs a decision.
+        operationBar.update(
+            operation: vm.operation,
+            conflicts: entries.filter { $0.displayStatus == .unmerged }.count
+        )
+        operationBar.isHidden = vm.operation == nil
+        operationBarHeight.constant = vm.operation == nil ? 0 : OperationBarView.height
+
         // Only assign when it differs — writing the text view on every keystroke
         // would collapse the insertion point back to the start.
         if composer.string != vm.commitMessage {
@@ -245,11 +270,17 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
                 new.identifier = FileRowView.identifier
                 return new
             }()
+        // A conflict sets both halves of the status, which is not the same
+        // thing as a partially staged file — saying "(partial)" about it reads
+        // as though half the conflict were resolved.
+        let conflicted = entry.displayStatus == .unmerged
+        let partial = entry.isPartiallyStaged && !conflicted
         cell.configure(
             path: entry.path,
             oldPath: entry.oldPath,
-            statusLabel: entry.isPartiallyStaged ? "\(entry.displayStatus.label) (partial)" : entry.displayStatus.label,
-            staged: entry.isFullyStaged
+            statusLabel: partial ? "\(entry.displayStatus.label) (partial)" : entry.displayStatus.label,
+            staged: entry.isFullyStaged,
+            conflicted: conflicted
         )
         cell.onToggle = { [weak self] in
             Task { await self?.toggleStaging([entry.path]) }
@@ -315,7 +346,22 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
             add(menu, "Copy Paths", #selector(copySelectedPaths))
         }
         menu.addItem(.separator())
+        if count == 1 {
+            add(menu, "Ignore File…", #selector(ignoreSelected))
+        }
+        // Gitbox called this Revert File…; Discard Changes is the same operation
+        // under the name the rest of this UI uses.
         add(menu, count > 1 ? "Discard Changes to \(count) Files…" : "Discard Changes…", #selector(discardSelected))
+        add(menu, count > 1 ? "Delete \(count) Files…" : "Delete File…", #selector(deleteSelected))
+    }
+
+    @objc private func ignoreSelected() {
+        guard let path = menuTargets.first?.path else { return }
+        actions.ignore(path: path)
+    }
+
+    @objc private func deleteSelected() {
+        actions.delete(paths: menuTargets.map(\.path))
     }
 
     private func add(_ menu: NSMenu, _ title: String, _ action: Selector) {
@@ -444,6 +490,79 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
             appState.opportunisticFetch()
         }
     }
+}
+
+/// The stage pane's only mode: a stopped rebase/merge/cherry-pick/revert, with
+/// the three ways out of it.
+private final class OperationBarView: NSView {
+    static let height: CGFloat = 38
+
+    var onAction: ((OperationAction) -> Void)?
+
+    private let label = NSTextField(labelWithString: "")
+    private let skipButton = NSButton(title: "Skip", target: nil, action: nil)
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        isHidden = true
+
+        label.font = NSFont.preferredFont(forTextStyle: .callout)
+        label.lineBreakMode = .byTruncatingTail
+        label.cell?.usesSingleLineMode = true
+
+        let abort = NSButton(title: "Abort", target: self, action: #selector(abortClicked))
+        abort.hasDestructiveAction = true
+        skipButton.target = self
+        skipButton.action = #selector(skipClicked)
+        let cont = NSButton(title: "Continue", target: self, action: #selector(continueClicked))
+        cont.keyEquivalent = ""
+        for button in [abort, skipButton, cont] {
+            button.bezelStyle = .rounded
+            button.controlSize = .small
+            button.setContentHuggingPriority(.required, for: .horizontal)
+        }
+
+        let stack = NSStackView(views: [label, abort, skipButton, cont])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("OperationBarView is created in code")
+    }
+
+    /// Drawn here rather than assigned once: `updateLayer` is what AppKit calls
+    /// again when the appearance flips, so the colour follows dark mode.
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.18).cgColor
+    }
+
+    func update(operation: RepositoryOperation?, conflicts: Int) {
+        guard let operation else { return }
+        var text = "\(operation.label) in progress"
+        if conflicts > 0 {
+            text += " — \(conflicts) conflicted file\(conflicts == 1 ? "" : "s")"
+        }
+        label.stringValue = text
+        skipButton.isHidden = !operation.canSkip
+    }
+
+    @objc private func abortClicked() { onAction?(.abort) }
+    @objc private func skipClicked() { onAction?(.skip) }
+    @objc private func continueClicked() { onAction?(.continue) }
 }
 
 private enum Composer {

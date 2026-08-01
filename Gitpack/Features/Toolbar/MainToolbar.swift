@@ -31,6 +31,7 @@ final class MainToolbar: NSObject, NSToolbarDelegate {
     private static let alignRetryLimit = 40
 
     private let appState: AppState
+    private lazy var actions = RepositoryActions(appState: appState)
     private let splitView: NSSplitView
     private let branchButton = NSPopUpButton(frame: .zero, pullsDown: true)
     private let otherBranchButton = NSPopUpButton(frame: .zero, pullsDown: true)
@@ -254,7 +255,9 @@ final class MainToolbar: NSObject, NSToolbarDelegate {
         subtitleLabel.isHidden = subtitleLabel.stringValue.isEmpty
 
         setTitle(vm?.currentBranch ?? "No Branch", on: branchButton)
-        branchButton.isEnabled = (vm?.branches.count ?? 0) > 1
+        // Enabled whenever a repo is selected: the menu carries New Branch, New
+        // Tag and the checkout submenus, not just the other local branches.
+        branchButton.isEnabled = vm != nil
 
         setTitle(vm?.otherBranch ?? "No Branch", on: otherBranchButton)
         otherBranchButton.isEnabled = !(vm?.remoteBranches.isEmpty ?? true) || (vm?.branches.count ?? 0) > 1
@@ -427,18 +430,30 @@ final class MainToolbar: NSObject, NSToolbarDelegate {
     }
 
     @objc private func checkoutBranch(_ sender: NSMenuItem) {
-        guard let name = sender.representedObject as? String,
-              let vm = appState.selectedViewModel else { return }
-        Task {
-            do {
-                try await appState.git.checkout(branch: name, at: vm.repository.url)
-                await vm.refreshAll(using: appState.git)
-            } catch let error as GitError {
-                vm.lastError = error.description
-            } catch {
-                vm.lastError = error.localizedDescription
-            }
-        }
+        guard let name = sender.representedObject as? String else { return }
+        actions.checkout(name)
+    }
+
+    @objc private func checkoutTag(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String else { return }
+        actions.checkoutDetached(name)
+    }
+
+    @objc private func checkoutRemoteBranch(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String else { return }
+        actions.checkoutTracking(name)
+    }
+
+    @objc private func checkoutCommit(_ sender: NSMenuItem) {
+        actions.checkoutCommitPrompt()
+    }
+
+    @objc private func newBranch(_ sender: NSMenuItem) {
+        actions.newBranch(from: "HEAD")
+    }
+
+    @objc private func newTag(_ sender: NSMenuItem) {
+        actions.newTag(at: "HEAD")
     }
 
     @objc private func selectOtherBranch(_ sender: NSMenuItem) {
@@ -505,9 +520,48 @@ extension MainToolbar: NSMenuDelegate {
                     checked: branch.isCurrent
                 ))
             }
+            buildCheckoutMenu(menu, vm: vm)
         } else if menu === otherBranchButton.menu {
             buildOtherBranchMenu(menu, vm: vm)
         }
+    }
+
+    /// Everything below the local branches in Gitbox's branch popup: the other
+    /// ways to move HEAD, then the two "make one right here" items, then the
+    /// settings sheet.
+    private func buildCheckoutMenu(_ menu: NSMenu, vm: RepositoryViewModel) {
+        menu.addItem(.separator())
+        if !vm.tags.isEmpty {
+            menu.addItem(submenu("Checkout Tag", items: vm.tags.map {
+                item($0.name, action: #selector(checkoutTag(_:)), checked: false)
+            }))
+        }
+        if !vm.remoteBranches.isEmpty {
+            menu.addItem(submenu("Checkout Remote Branch", items: vm.remoteBranches.map {
+                item($0, action: #selector(checkoutRemoteBranch(_:)), checked: false)
+            }))
+        }
+        menu.addItem(item("Checkout Commit…", action: #selector(checkoutCommit(_:)), checked: false))
+        menu.addItem(.separator())
+        menu.addItem(item("New Branch…", action: #selector(newBranch(_:)), checked: false))
+        menu.addItem(item("New Tag…", action: #selector(newTag(_:)), checked: false))
+        menu.addItem(.separator())
+        // Responder chain, like the menu bar: the sheet is the window's to show.
+        let edit = NSMenuItem(
+            title: "Edit Branches and Tags…",
+            action: #selector(AppDelegate.showRepositorySettings(_:)),
+            keyEquivalent: ""
+        )
+        edit.target = nil
+        menu.addItem(edit)
+    }
+
+    private func submenu(_ title: String, items: [NSMenuItem]) -> NSMenuItem {
+        let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        let sub = NSMenu(title: title)
+        items.forEach { sub.addItem($0) }
+        parent.submenu = sub
+        return parent
     }
 
     private func buildOtherBranchMenu(_ menu: NSMenu, vm: RepositoryViewModel) {

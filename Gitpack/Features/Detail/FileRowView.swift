@@ -18,6 +18,7 @@ final class FileRowView: NSTableCellView {
     // its colours inside its attributed string.
     private var pathText = ""
     private var tokens: [SearchToken] = []
+    private var conflicted = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -75,6 +76,7 @@ final class FileRowView: NSTableCellView {
         oldPath: String?,
         statusLabel: String,
         staged: Bool?,
+        conflicted: Bool = false,
         tokens: [SearchToken] = []
     ) {
         icon.image = NSImage(systemSymbolName: iconName(for: path), accessibilityDescription: nil)
@@ -82,6 +84,7 @@ final class FileRowView: NSTableCellView {
         pathText = displayPath(path: path, oldPath: oldPath)
         pathField.toolTip = pathText
         statusField.stringValue = statusLabel
+        self.conflicted = conflicted
         checkbox.isHidden = staged == nil
         checkbox.state = staged == true ? .on : .off
         applyColors()
@@ -98,7 +101,10 @@ final class FileRowView: NSTableCellView {
             font: NSFont.preferredFont(forTextStyle: .body),
             color: selected ? .alternateSelectedControlTextColor : .labelColor
         )
-        statusField.textColor = selected ? .alternateSelectedControlTextColor : .secondaryLabelColor
+        // A conflict is the one status worth reading before the file name.
+        statusField.textColor = selected
+            ? .alternateSelectedControlTextColor
+            : (conflicted ? .systemOrange : .secondaryLabelColor)
         icon.contentTintColor = selected ? .alternateSelectedControlTextColor : .secondaryLabelColor
     }
 

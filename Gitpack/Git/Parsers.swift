@@ -58,19 +58,61 @@ nonisolated enum LogParser {
         )
     }
 
-    /// Built per parse and passed down: `ISO8601DateFormatter` is a class and
-    /// isn't `Sendable`, so a `nonisolated` parser can't keep one around.
-    private struct ISODates {
-        private let fractional = ISO8601DateFormatter()
-        private let plain = ISO8601DateFormatter()
+}
 
-        init() {
-            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            plain.formatOptions = [.withInternetDateTime]
+/// Built per parse and passed down: `ISO8601DateFormatter` is a class and isn't
+/// `Sendable`, so a `nonisolated` parser can't keep one around.
+private struct ISODates {
+    private let fractional = ISO8601DateFormatter()
+    private let plain = ISO8601DateFormatter()
+
+    init() {
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        plain.formatOptions = [.withInternetDateTime]
+    }
+
+    func date(from string: String) -> Date {
+        fractional.date(from: string) ?? plain.date(from: string) ?? Date()
+    }
+}
+
+/// NUL-terminated records with US-separated fields — the shape every `--format=`
+/// in this file asks for. git ends each record with a newline of its own after
+/// the NUL, which the trim takes back off.
+private func records(_ text: String, fields expected: Int) -> [[String]] {
+    text.split(separator: "\u{00}", omittingEmptySubsequences: true).compactMap { record in
+        let fields = record
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: "\u{1F}")
+        guard fields.count >= expected, !fields[0].isEmpty else { return nil }
+        return fields
+    }
+}
+
+// MARK: - Tag parser
+
+nonisolated enum TagParser {
+    /// `%(*objectname)` is the peeled target: empty for a lightweight tag, whose
+    /// own object already *is* the commit.
+    static let format = "%(refname:short)%1f%(objectname)%1f%(*objectname)%00"
+
+    static func parse(_ text: String) -> [Tag] {
+        records(text, fields: 3).map {
+            Tag(name: $0[0], targetSHA: $0[2].isEmpty ? $0[1] : $0[2])
         }
+    }
+}
 
-        func date(from string: String) -> Date {
-            fractional.date(from: string) ?? plain.date(from: string) ?? Date()
+// MARK: - Stash parser
+
+nonisolated enum StashParser {
+    /// `%gd` is the reflog selector (`stash@{0}`), `%gs` its subject.
+    static let format = "%gd%x1f%gs%x1f%aI%x00"
+
+    static func parse(_ text: String) -> [Stash] {
+        let dates = ISODates()
+        return records(text, fields: 3).map {
+            Stash(ref: $0[0], message: $0[1], date: dates.date(from: $0[2]))
         }
     }
 }

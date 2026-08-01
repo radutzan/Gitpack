@@ -8,7 +8,9 @@ final class CommitViewController: NSViewController, NSTableViewDataSource, NSTab
     private let parentField = monospacedValueField()
     private let dateField = valueField()
     private let authorField = valueField()
+    private let tagsField = valueField()
     private var parentRow: NSGridRow!
+    private var tagsRow: NSGridRow!
 
     private let messageField = NSTextField(wrappingLabelWithString: "")
     private let messageScroll = NSScrollView()
@@ -112,12 +114,14 @@ final class CommitViewController: NSViewController, NSTableViewDataSource, NSTab
             [label("Parent"), parentField],
             [label("Date"), dateField],
             [label("Author"), authorField],
+            [label("Tags"), tagsField],
         ])
         grid.rowSpacing = 3
         grid.columnSpacing = 6
         grid.column(at: 0).xPlacement = .trailing
         grid.column(at: 0).width = 60
         parentRow = grid.row(at: 1)
+        tagsRow = grid.row(at: 4)
 
         parentField.textColor = .controlAccentColor
 
@@ -201,6 +205,10 @@ final class CommitViewController: NSViewController, NSTableViewDataSource, NSTab
         parentField.stringValue = commit.parents.joined(separator: " ")
         dateField.stringValue = commit.date.formatted(DateFormat.commitDetailTimestamp)
         authorField.stringValue = "\(commit.authorName) <\(commit.authorEmail)>"
+
+        let tags = vm.tags(for: commit.id)
+        tagsRow.isHidden = tags.isEmpty
+        tagsField.stringValue = tags.joined(separator: ", ")
 
         let body = commit.body.trimmingCharacters(in: .whitespacesAndNewlines)
         let message = body.isEmpty ? commit.subject : commit.subject + "\n\n" + body

@@ -7,14 +7,15 @@ import AppKit
 /// for unmaterialized rows diverges from measured two-line rows, and any
 /// selection change then scrolls to a garbage offset. A uniform height is also
 /// the precondition for M3's streaming search.
-final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
+final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
     private enum Row: Equatable {
         case workingCopy(summary: String, subtitle: String, dirty: Bool)
-        case commit(Commit, marker: CommitMarker)
+        case commit(Commit, marker: CommitMarker, tags: [String])
         case loadMore
     }
 
     private let appState: AppState
+    private lazy var actions = RepositoryActions(appState: appState)
     private let tableView = KeyTableView()
     private let scrollView = NSScrollView()
     private let placeholder = HistoryPlaceholderView()
@@ -31,6 +32,9 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
     /// The last selection pushed into the table, so a reload can tell "the user
     /// picked a different row" apart from "the rows changed underneath us".
     private var lastSelection: HistoryItem?
+
+    /// The commit the open context menu acts on, captured when it is built.
+    private var menuCommit: Commit?
 
     init(appState: AppState) {
         self.appState = appState
@@ -62,6 +66,10 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
         tableView.onBareKey = { [weak self] key in
             self?.handleBareKey(key) ?? false
         }
+
+        let menu = NSMenu()
+        menu.delegate = self
+        tableView.menu = menu
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -165,10 +173,12 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
         // While searching there is no working-copy row and no paging row: the
         // list is exactly the matches, and the search walks history by itself.
         if vm.isSearchActive {
-            return vm.searchResults.map { .commit($0, marker: vm.marker(for: $0)) }
+            return vm.searchResults.map { .commit($0, marker: vm.marker(for: $0), tags: vm.tags(for: $0.id)) }
         }
         var result: [Row] = [workingCopyRow(vm.status)]
-        result.append(contentsOf: vm.commits.map { .commit($0, marker: vm.marker(for: $0)) })
+        result.append(contentsOf: vm.commits.map {
+            .commit($0, marker: vm.marker(for: $0), tags: vm.tags(for: $0.id))
+        })
         if vm.hasMoreHistory && !vm.commits.isEmpty {
             result.append(.loadMore)
         }
@@ -215,7 +225,7 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
     private func item(for row: Row) -> HistoryItem? {
         switch row {
         case .workingCopy: .workingCopy
-        case .commit(let commit, _): .commit(commit.id)
+        case .commit(let commit, _, _): .commit(commit.id)
         case .loadMore: nil
         }
     }
@@ -277,9 +287,9 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
             cell.configureWorkingCopy(title: summary, subtitle: subtitle, dirty: dirty)
             return cell
 
-        case .commit(let commit, let marker):
+        case .commit(let commit, let marker, let tags):
             let cell = commitCell(tableView)
-            cell.configure(commit: commit, marker: marker, tokens: tokens)
+            cell.configure(commit: commit, marker: marker, tags: tags, tokens: tokens)
             return cell
         }
     }
@@ -309,6 +319,104 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
         guard rows.indices.contains(row), case .loadMore = rows[row],
               let vm = appState.selectedViewModel else { return }
         Task { await vm.loadMoreHistory(using: appState.git) }
+    }
+
+    // MARK: - Commit context menu
+
+    /// Gitbox's power-user surface. Everything here acts on the *selected*
+    /// commit: a right-click pulls its row into the selection first, so the
+    /// menu and the detail pane can never disagree about what you clicked.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let clicked = tableView.clickedRow
+        if rows.indices.contains(clicked), case .commit = rows[clicked], tableView.selectedRow != clicked {
+            tableView.selectRowIndexes([clicked], byExtendingSelection: false)
+        }
+        guard let vm = appState.selectedViewModel,
+              case .commit(let sha)? = vm.selection,
+              let commit = vm.commit(withID: sha) else { return }
+        menuCommit = commit
+
+        add(menu, "New Tag…", #selector(newTagHere))
+        add(menu, "New Branch…", #selector(newBranchHere))
+        menu.addItem(.separator())
+        add(menu, "Merge into \(vm.currentBranch ?? "HEAD")", #selector(mergeCommit))
+        add(menu, "Cherry-pick", #selector(cherryPickCommit))
+        add(menu, "Apply as Patch", #selector(applyCommitAsPatch))
+        menu.addItem(.separator())
+        add(menu, "Checkout…", #selector(checkoutCommit))
+        add(menu, "Revert Commit…", #selector(revertCommit))
+        add(menu, "Reset Branch to Here…", #selector(resetToCommit))
+
+        let tags = vm.tags(for: commit.id)
+        if !tags.isEmpty {
+            menu.addItem(.separator())
+            for tag in tags {
+                let item = NSMenuItem(title: "Delete Tag “\(tag)”…", action: #selector(deleteTag(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = tag
+                menu.addItem(item)
+            }
+        }
+        menu.addItem(.separator())
+        add(menu, "Copy Commit SHA", #selector(copyCommitSHA))
+    }
+
+    private func add(_ menu: NSMenu, _ title: String, _ action: Selector) {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+    }
+
+    @objc private func newTagHere() {
+        guard let commit = menuCommit else { return }
+        actions.newTag(at: commit.id)
+    }
+
+    @objc private func newBranchHere() {
+        guard let commit = menuCommit else { return }
+        actions.newBranch(from: commit.id)
+    }
+
+    @objc private func mergeCommit() {
+        guard let commit = menuCommit else { return }
+        actions.merge(commit)
+    }
+
+    @objc private func cherryPickCommit() {
+        guard let commit = menuCommit else { return }
+        actions.cherryPick(commit)
+    }
+
+    @objc private func applyCommitAsPatch() {
+        guard let commit = menuCommit else { return }
+        actions.applyAsPatch(commit)
+    }
+
+    @objc private func checkoutCommit() {
+        guard let commit = menuCommit else { return }
+        actions.checkoutDetached(commit.id)
+    }
+
+    @objc private func revertCommit() {
+        guard let commit = menuCommit else { return }
+        actions.revert(commit)
+    }
+
+    @objc private func resetToCommit() {
+        guard let commit = menuCommit else { return }
+        actions.reset(to: commit)
+    }
+
+    @objc private func deleteTag(_ sender: NSMenuItem) {
+        guard let tag = sender.representedObject as? String else { return }
+        actions.deleteTag(tag)
+    }
+
+    @objc private func copyCommitSHA() {
+        guard let commit = menuCommit else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(commit.id, forType: .string)
     }
 
     /// Esc from anywhere else in the pane. The list itself takes Esc in

@@ -95,6 +95,44 @@ lands at page granularity, and `--skip` re-walks the graph from the tips on each
 page. The upgrade path is one streamed `git log -p`, split on the 0x1E byte and
 killed on cancel.
 
+## Repository operations
+
+Every branch/tag/stash/history operation lives in `Features/Actions/RepositoryActions.swift`
+as one method holding its dialog, its `GitService` call, and its refresh. The
+branch popup, the commit context menu, the menu bar, the settings sheet and the
+file lists all call into it, so none of them grows its own copy of
+prompt → run → `refreshAll`. Each method is fire-and-forget, which is what keeps
+`@objc` menu handlers one-liners. Dialogs are modal `NSAlert`s (`Shared/Prompts.swift`),
+so an action reads its answer inline instead of threading a completion handler
+back through the menu plumbing.
+
+Notable decisions:
+
+- **Tags are always annotated.** `git push --follow-tags` only carries annotated
+  tags, and that is what makes Gitbox's "tags push with the branch" free rather
+  than a second push. Ordering is git's own `--sort=-version:refname`.
+- **Reset stashes first.** A dirty working copy is stashed (`stash push -u`) and
+  then the branch is reset hard, so the changes are recoverable from the stash
+  list rather than blocking the reset.
+- **Apply, never pop.** A stash survives being applied; removal is explicit.
+- **Delete File moves to the Trash** rather than running `git rm`: the deletion
+  still shows up as a change to stage, and it stays recoverable.
+- **`GIT_EDITOR=/usr/bin/true`** joins `GIT_TERMINAL_PROMPT=0` and the askpass
+  settings in `runGit`. `rebase --continue`, `merge` and `revert` would otherwise
+  launch `$EDITOR` and wait forever; accepting the message git already prepared
+  is what a GUI wants anyway.
+
+**The stopped-operation mode.** A rebase, merge, cherry-pick or revert that
+stops half-way is the only "mode" the app has. It is detected by four `stat`s on
+the git directory (`rebase-merge`/`rebase-apply`, `MERGE_HEAD`,
+`CHERRY_PICK_HEAD`, `REVERT_HEAD`) rather than a `git rev-parse --git-path`
+process, because the check runs on every status refresh and FSEvents fires a
+lot; `.git` being a *file* (linked worktree, submodule) is handled by reading
+the `gitdir:` line. `RepositoryOperation`'s raw value is the git subcommand, so
+Abort/Skip/Continue is one call for all four. When an operation starts, the
+history selection jumps to the stage pane — that is where the buttons out of the
+mode live.
+
 ## Module layout
 
 The UI layer is AppKit throughout — no SwiftUI remains in the target. See
@@ -119,12 +157,16 @@ Gitpack/
 ├── DiffTool/
 │   └── DiffToolService.swift   temp-file plumbing + opendiff invocation
 ├── Features/
+│   ├── Actions/RepositoryActions.swift   every mutation + its dialog
+│   ├── Checkout/QuickCheckoutController.swift  ⌘⇧C type-to-find sheet
+│   ├── Settings/RepositorySettingsController.swift  ⌘I three-tab sheet
 │   ├── Sidebar/SidebarViewController.swift  NSOutlineView source list
 │   ├── History/{HistoryViewController,CommitRowView}.swift  NSTableView
 │   ├── Detail/{Detail,WorkingCopy,Commit}ViewController.swift + FileRowView.swift
 │   └── Toolbar/MainToolbar.swift         NSToolbarDelegate
 ├── Shared/
 │   ├── Formatters.swift
+│   ├── Prompts.swift             NSAlert confirm + text prompt
 │   ├── KeyTableView.swift        bare-key shortcuts before type-select
 │   └── Observation+AppKit.swift  re-arming withObservationTracking
 └── Assets.xcassets
@@ -147,6 +189,7 @@ All git output is requested in NUL-terminated form (`-z` flag, format strings us
 - `git log` records use `%x1e` (RS) as commit separator and `%x1f` (US) as field separator inside.
 - `git status --porcelain=v2 -z` records are NUL-terminated; type-2 (rename/copy) entries are split across two NUL records (the entry, then the original path).
 - `git diff-tree -r -z` produces `<status>\0<path>\0` for plain entries and `<status>\0<oldPath>\0<newPath>\0` for renames/copies.
+- `git for-each-ref` (tags) and `git stash list` use the same shape: US between fields, NUL between records. An annotated tag's `%(*objectname)` is the peeled commit and is empty for a lightweight tag, whose own object already is the commit.
 
 ## File watching
 

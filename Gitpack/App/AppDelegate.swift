@@ -1,8 +1,9 @@
 import AppKit
 
 @main
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
     private let appState = AppState()
+    private lazy var actions = RepositoryActions(appState: appState)
     private var windowController: MainWindowController?
     private var loadTask: Task<Void, Never>?
 
@@ -20,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.mainMenu = MainMenu.build()
+        NSApp.mainMenu = MainMenu.build(stashDelegate: self)
 
         let controller = MainWindowController(appState: appState)
         windowController = controller
@@ -95,6 +96,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         windowController?.beginSearch()
     }
 
+    /// ⌘⇧C and ⌘I: both are windows of their own, so the window controller owns
+    /// them; everything else here is a model operation.
+    @objc func quickCheckout(_ sender: Any?) {
+        windowController?.showQuickCheckout()
+    }
+
+    @objc func showRepositorySettings(_ sender: Any?) {
+        windowController?.showRepositorySettings()
+    }
+
+    @objc func newBranch(_ sender: Any?) { actions.newBranch(from: "HEAD") }
+    @objc func newTag(_ sender: Any?) { actions.newTag(at: "HEAD") }
+    @objc func stashChanges(_ sender: Any?) { actions.stashChanges() }
+    @objc func removeStashes(_ sender: Any?) { actions.removeStashes() }
+
+    @objc func applyStash(_ sender: NSMenuItem) {
+        guard let stash = sender.representedObject as? Stash else { return }
+        actions.applyStash(stash)
+    }
+
+    /// The Apply Stash submenu, rebuilt each time it opens.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let stashes = appState.selectedViewModel?.stashes ?? []
+        guard !stashes.isEmpty else {
+            menu.addItem(withTitle: "No Stashes", action: nil, keyEquivalent: "")
+            return
+        }
+        for stash in stashes {
+            let item = NSMenuItem(title: stash.message, action: #selector(applyStash(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = stash
+            item.toolTip = "\(stash.ref) — \(stash.date.formatted(DateFormat.commitTimestamp))"
+            menu.addItem(item)
+        }
+    }
+
     @objc func openInFinder(_ sender: Any?) {
         guard let url = appState.selectedRepository?.url else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -138,8 +176,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return vm != nil && !busy
         case #selector(openInFinder(_:)), #selector(openInTerminal(_:)):
             return appState.selectedRepository != nil
-        case #selector(findInHistory(_:)):
+        case #selector(findInHistory(_:)), #selector(quickCheckout(_:)),
+             #selector(showRepositorySettings(_:)), #selector(newBranch(_:)), #selector(newTag(_:)):
             return vm != nil
+        case #selector(stashChanges(_:)):
+            return vm?.status.map { !$0.isClean } ?? false
+        case #selector(removeStashes(_:)):
+            return !(vm?.stashes.isEmpty ?? true)
         case #selector(stageAll(_:)):
             return !(vm?.unstagedPaths.isEmpty ?? true)
         case #selector(commitChanges(_:)):

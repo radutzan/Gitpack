@@ -17,6 +17,7 @@ final class CommitRowView: NSTableCellView {
     private let title = NSTextField(labelWithString: "")
     private let timestamp = NSTextField(labelWithString: "")
     private let subtitle = NSTextField(labelWithString: "")
+    private let tagBadge = TagBadgeView()
 
     // Kept so `backgroundStyle` can swap them out and back. NSTableCellView
     // recolors its own `textField`/`imageView` outlets automatically, but not
@@ -32,6 +33,7 @@ final class CommitRowView: NSTableCellView {
     private var subtitleText = ""
     private var subtitleFont = RowFont.body
     private var tokens: [SearchToken] = []
+    private var marker = CommitMarker.none
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -57,7 +59,14 @@ final class CommitRowView: NSTableCellView {
         timestamp.setContentCompressionResistancePriority(.required, for: .horizontal)
         timestamp.setContentHuggingPriority(.required, for: .horizontal)
 
-        for subview in [dot, title, timestamp, subtitle] {
+        // A stack, so hiding the badge on an untagged commit closes the gap
+        // without a second set of constraints to toggle.
+        let secondLine = NSStackView(views: [tagBadge, subtitle])
+        secondLine.orientation = .horizontal
+        secondLine.alignment = .centerY
+        secondLine.spacing = 5
+
+        for subview in [dot, title, timestamp, secondLine] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             addSubview(subview)
         }
@@ -75,13 +84,18 @@ final class CommitRowView: NSTableCellView {
             timestamp.trailingAnchor.constraint(equalTo: trailingAnchor),
             timestamp.firstBaselineAnchor.constraint(equalTo: title.firstBaselineAnchor),
 
-            subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            subtitle.trailingAnchor.constraint(equalTo: trailingAnchor),
-            subtitle.topAnchor.constraint(equalTo: centerYAnchor, constant: 1),
+            secondLine.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            secondLine.trailingAnchor.constraint(equalTo: trailingAnchor),
+            secondLine.topAnchor.constraint(equalTo: centerYAnchor, constant: 1),
         ])
     }
 
-    func configure(commit: Commit, marker: CommitMarker, tokens: [SearchToken] = []) {
+    func configure(
+        commit: Commit,
+        marker: CommitMarker,
+        tags: [String] = [],
+        tokens: [SearchToken] = []
+    ) {
         // Unmerged (other-branch-only) commits render italic and faded, like
         // Gitbox; merge commits keep their existing de-emphasis.
         let deemphasized = commit.isMerge || marker == .unmerged
@@ -101,15 +115,18 @@ final class CommitRowView: NSTableCellView {
         subtitleFont = deemphasized ? RowFont.italic : RowFont.body
         subtitleText = commit.subject.isEmpty ? " " : commit.subject
 
+        tagBadge.text = tags.joined(separator: "  ")
+
         dot.isHidden = marker == .none
-        dot.layer?.backgroundColor = markerColor(marker).cgColor
         dot.toolTip = markerHelp(marker)
+        self.marker = marker
 
         applyColors()
     }
 
     func configureWorkingCopy(title text: String, subtitle subtitleText: String, dirty: Bool) {
         tokens = []
+        tagBadge.text = ""
         titleText = text
         titleFont = dirty ? RowFont.semibold : RowFont.body
         titleColor = dirty ? .labelColor : .secondaryLabelColor
@@ -130,8 +147,18 @@ final class CommitRowView: NSTableCellView {
         didSet { applyColors() }
     }
 
+    /// Layer-backed colours are resolved once and don't follow the appearance on
+    /// their own — the dot and the badge both go stale on a light/dark switch
+    /// without this.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
     private func applyColors() {
         let selected = backgroundStyle == .emphasized
+        dot.layer?.backgroundColor = markerColor(marker).cgColor
+        tagBadge.applyColors(selected: selected)
         title.setText(
             titleText, tokens: tokens, font: titleFont,
             color: selected ? .alternateSelectedControlTextColor : titleColor
@@ -157,6 +184,55 @@ final class CommitRowView: NSTableCellView {
         case .unpushed: "Not yet pushed to the other branch"
         case .unmerged: "On the other branch, not yet merged"
         }
+    }
+}
+
+/// Tag names on a history row, as one capsule. Gitbox drew a badge per tag; one
+/// badge holding them all keeps the row a fixed height, which the list depends on.
+private final class TagBadgeView: NSView {
+    private let label = NSTextField(labelWithString: "")
+
+    var text: String {
+        get { label.stringValue }
+        set {
+            label.stringValue = newValue
+            isHidden = newValue.isEmpty
+        }
+    }
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 3
+        isHidden = true
+
+        label.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
+        label.lineBreakMode = .byTruncatingTail
+        label.cell?.usesSingleLineMode = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 5),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 1),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("TagBadgeView is created in code")
+    }
+
+    func applyColors(selected: Bool) {
+        label.textColor = selected ? .alternateSelectedControlTextColor : .secondaryLabelColor
+        layer?.backgroundColor = (selected
+            ? NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.25)
+            : NSColor.quaternaryLabelColor).cgColor
     }
 }
 
