@@ -57,6 +57,11 @@ final class MainWindowController: NSWindowController {
         fatalError("MainWindowController is created in code")
     }
 
+    /// ⌘F, routed from `AppDelegate` — the toolbar owns the search field.
+    func beginSearch() {
+        mainToolbar.beginSearch()
+    }
+
     private func updateTitle() {
         guard let window else { return }
         guard let repo = appState.selectedRepository else {

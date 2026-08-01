@@ -41,16 +41,17 @@ Gitbox's identity: "see all your repositories at a glance." Requires an architec
 - New remote commits appear live with blue dots when the repo is selected.
 - ~~Sidebar drag-reorder.~~ **Done 2026-07-27** — fell out of `NSOutlineView`'s drag API during the AppKit migration.
 
-## Milestone 3 — Live history search
+## Milestone 3 — Live history search ✅ **Done 2026-08-01**
 
 Gitbox's signature feature. ⌘F / toolbar field streams `git log -p` and filters live — no index.
 
 - ~~**First task: migrate the history list to `NSTableView`.**~~ **Done 2026-07-27**, and it grew: the whole UI was rewritten in AppKit rather than just this list (`docs/plans/2026-07-27-appkit-migration.md`). Search now builds directly on `HistoryViewController`'s `NSTableView` — uniform 45pt rows, no bridge layer, and the reload/selection/scroll discipline it needs is already in place.
-- Matches commit metadata (author, SHA, date), file paths, and **added/removed diff lines**; space-separated tokens AND together; quoted phrases match exact case.
-- Yellow highlight of matched substrings in history rows, file lists, and message text.
-- Thin results bar atop the history list: live count ("152 commits") + progress spinner; Esc cancels the stream.
-- Show File History (⌘D): filter history to commits touching the selected file (same pipeline, path filter).
-- Implementation: incremental `git log -p -z`-style streaming parse off-main-actor, batched UI updates; cancellation via process kill. `Documents/Search.txt` in the Gitbox repo is the spec — follow it.
+- ~~Matches commit metadata (author, SHA, date), file paths, and **added/removed diff lines**; space-separated tokens AND together; quoted phrases match exact case.~~ Done — the whole `git log -p -U0` record is one haystack, so every field matches without per-field plumbing (`SearchQuery` in `Parsers.swift`).
+- ~~Yellow highlight of matched substrings in history rows, file lists, and message text.~~ Done, in `NSColor.findHighlightColor`.
+- ~~Thin results bar atop the history list: live count ("152 commits") + progress spinner; Esc cancels the stream.~~ Done.
+- ~~Show File History (⌘D): filter history to commits touching the selected file (same pipeline, path filter).~~ Done — empty token list + a pathspec, so it reuses the search loop and skips `-p`.
+- Implementation: ~~incremental `git log -p -z`-style streaming parse off-main-actor, batched UI updates; cancellation via process kill.~~ **Shipped as pages, not one stream** — a 200-commit `git log -p -U0` per iteration, matched inside `CLIGitService` so patches never reach the main actor, appended as each page lands. Same live feel; the ceilings (page-granularity cancel, `--skip` re-walking the graph on a very deep tail) are recorded in the `ponytail:` comment on `RepositoryViewModel.runSearch`. `Documents/Search.txt` in the Gitbox repo was the spec.
+- **Not carried over from the spec**: highlighting a file's *whole* name when the match was in its contents rather than its name — that needs per-file attribution the patch isn't parsed for. Do it when the diff gets parsed for another reason.
 
 ## Milestone 4 — Full branch, tag, stash, and history operations
 

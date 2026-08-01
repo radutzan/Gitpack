@@ -89,6 +89,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         Task { await vm.performSync(action, using: appState.git) }
     }
 
+    /// ⌘F. The search field lives in the toolbar; the query itself lives on the
+    /// view model, so this only has to move focus.
+    @objc func findInHistory(_ sender: Any?) {
+        windowController?.beginSearch()
+    }
+
     @objc func openInFinder(_ sender: Any?) {
         guard let url = appState.selectedRepository?.url else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -132,6 +138,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return vm != nil && !busy
         case #selector(openInFinder(_:)), #selector(openInTerminal(_:)):
             return appState.selectedRepository != nil
+        case #selector(findInHistory(_:)):
+            return vm != nil
         case #selector(stageAll(_:)):
             return !(vm?.unstagedPaths.isEmpty ?? true)
         case #selector(commitChanges(_:)):

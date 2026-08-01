@@ -110,6 +110,130 @@ final class RepositoryViewModel {
     /// true forever once you've paged past the first screen.
     private(set) var hasMoreHistory = true
 
+    // MARK: - Live search
+
+    /// The query as typed. Owned here rather than by the search field for the
+    /// same reason `commitMessage` is: ⌘F and Esc reach it without going
+    /// through the view hierarchy, and it survives switching repos and back.
+    var searchQuery = ""
+    /// Show File History: restricts the same pipeline to one path.
+    private(set) var searchPathFilter: String?
+    private(set) var searchResults: [Commit] = []
+    /// The tokens the visible results were produced with — what the rows
+    /// highlight. Kept separate from `searchQuery` so highlighting can't run
+    /// ahead of the results while you are still typing.
+    private(set) var searchTokens: [SearchToken] = []
+    private(set) var searchScanned = 0
+    private(set) var isSearching = false
+    private var searchTask: Task<Void, Never>?
+    /// Bumped on every restart so a page that lands from a superseded search
+    /// can't append its results or clear the spinner.
+    private var searchGeneration = 0
+    private let searchPageSize = 200
+
+    var isSearchActive: Bool {
+        searchPathFilter != nil || !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// What the history list shows: results while a search is on, the real
+    /// history otherwise.
+    var displayedCommits: [Commit] {
+        isSearchActive ? searchResults : commits
+    }
+
+    /// A commit by SHA from either list — a search result can be far deeper in
+    /// history than the loaded page, and the detail pane still has to find it.
+    func commit(withID id: String) -> Commit? {
+        commits.first { $0.id == id } ?? searchResults.first { $0.id == id }
+    }
+
+    /// (Re)starts the search for the current query and path filter. Safe to call
+    /// on every keystroke: the previous run is cancelled and the incremental
+    /// delay restarts with it, which is Gitbox's "restart the timer" rule.
+    func updateSearch(using git: GitService) {
+        searchTask?.cancel()
+        searchGeneration += 1
+        let generation = searchGeneration
+        let tokens = SearchQuery.parse(searchQuery)
+        let paths = searchPathFilter.map { [$0] } ?? []
+
+        searchTokens = tokens
+        searchResults = []
+        searchScanned = 0
+
+        guard !tokens.isEmpty || !paths.isEmpty else {
+            isSearching = false
+            searchTask = nil
+            return
+        }
+        isSearching = true
+        searchTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let self, !Task.isCancelled, generation == self.searchGeneration else { return }
+            await self.runSearch(generation: generation, tokens: tokens, paths: paths, using: git)
+        }
+    }
+
+    func showFileHistory(path: String, using git: GitService) {
+        searchPathFilter = path
+        searchQuery = ""
+        updateSearch(using: git)
+    }
+
+    /// Esc, and the results bar's close button: drop the query, the filter and
+    /// the running stream, and fall back to normal history.
+    func cancelSearch() {
+        searchTask?.cancel()
+        searchTask = nil
+        searchGeneration += 1
+        searchQuery = ""
+        searchPathFilter = nil
+        searchTokens = []
+        searchResults = []
+        searchScanned = 0
+        isSearching = false
+    }
+
+    /// Walks history a page at a time, appending matches as they arrive, until
+    /// it runs out or is superseded. No index, by design — Gitbox searched live
+    /// too, and an index would have to be invalidated on every fetch.
+    ///
+    /// ponytail: pages rather than one streamed `git log -p`. Cancellation
+    /// therefore lands at page granularity (an in-flight page finishes and is
+    /// dropped), and `--skip` re-walks the graph from the tips each page, which
+    /// is quadratic in the deep tail of a very large repo. Upgrade path is a
+    /// single streamed process, split on the 0x1E byte, killed on cancel.
+    private func runSearch(
+        generation: Int,
+        tokens: [SearchToken],
+        paths: [String],
+        using git: GitService
+    ) async {
+        let url = repository.url
+        let refs = historyRefs
+        var skip = 0
+        while !Task.isCancelled, generation == searchGeneration {
+            do {
+                let page = try await git.searchLog(
+                    at: url, tokens: tokens, paths: paths,
+                    limit: searchPageSize, skip: skip, refs: refs
+                )
+                guard !Task.isCancelled, generation == searchGeneration else { return }
+                skip += page.scanned
+                searchScanned = skip
+                if !page.matches.isEmpty {
+                    searchResults.append(contentsOf: page.matches)
+                }
+                if page.scanned < searchPageSize { break }
+            } catch {
+                break
+            }
+        }
+        if generation == searchGeneration {
+            isSearching = false
+        }
+    }
+
     init(repository: Repository) {
         self.repository = repository
     }

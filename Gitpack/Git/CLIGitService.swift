@@ -89,16 +89,46 @@ actor CLIGitService: GitService {
 
     func log(at url: URL, limit: Int, skip: Int, refs: [String]) async throws -> [Commit] {
         // %x1f = US (unit separator), %x1e = RS (record separator)
-        let format = "%H%x1f%h%x1f%an%x1f%ae%x1f%aI%x1f%P%x1f%s%x1f%b%x1e"
         var args: [String] = [
             "log",
             "--max-count=\(limit)",
             "--skip=\(skip)",
-            "--format=\(format)"
+            "--format=\(LogParser.format)"
         ]
         args.append(contentsOf: refs)
         let result = try await runGit(args, at: url)
         return LogParser.parse(result.stdoutString)
+    }
+
+    func searchLog(
+        at url: URL,
+        tokens: [SearchToken],
+        paths: [String],
+        limit: Int,
+        skip: Int,
+        refs: [String]
+    ) async throws -> CommitSearchPage {
+        var args: [String] = [
+            "log",
+            "--max-count=\(limit)",
+            "--skip=\(skip)",
+            "--format=\(LogParser.format)"
+        ]
+        if !tokens.isEmpty {
+            // -U0 because the spec matches added and removed lines, not the
+            // context around them — which also cuts the page to a fraction of
+            // its size. --no-ext-diff so a configured difftool isn't launched
+            // once per commit; --no-color so a `color.diff = always` config
+            // can't slip escape codes into the haystack.
+            args.append(contentsOf: ["-p", "-U0", "--no-ext-diff", "--no-color"])
+        }
+        args.append(contentsOf: refs)
+        if !paths.isEmpty {
+            args.append("--")
+            args.append(contentsOf: paths)
+        }
+        let result = try await runGit(args, at: url)
+        return LogParser.parseSearch(result.stdoutString, tokens: tokens)
     }
 
     func divergence(current: String, other: String, at url: URL) async throws -> Divergence {

@@ -5,8 +5,11 @@ nonisolated struct ProcessResult: Sendable {
     let stdout: Data
     let stderr: Data
 
-    var stdoutString: String { String(data: stdout, encoding: .utf8) ?? "" }
-    var stderrString: String { String(data: stderr, encoding: .utf8) ?? "" }
+    // Lossy on purpose. `String(data:encoding:)` returns nil for the whole
+    // buffer on a single invalid byte, so one latin-1 line in a patch or a
+    // commit message used to blank the entire page.
+    var stdoutString: String { String(decoding: stdout, as: UTF8.self) }
+    var stderrString: String { String(decoding: stderr, as: UTF8.self) }
 }
 
 enum ProcessRunner {

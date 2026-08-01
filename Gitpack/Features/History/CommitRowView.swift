@@ -25,6 +25,14 @@ final class CommitRowView: NSTableCellView {
     private var titleColor: NSColor = .labelColor
     private var timestampColor: NSColor = .controlAccentColor
 
+    // The text has to be re-applied whenever the selection changes, because a
+    // highlighted row carries its colours inside its attributed string.
+    private var titleText = ""
+    private var titleFont = RowFont.semibold
+    private var subtitleText = ""
+    private var subtitleFont = RowFont.body
+    private var tokens: [SearchToken] = []
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         build()
@@ -73,13 +81,14 @@ final class CommitRowView: NSTableCellView {
         ])
     }
 
-    func configure(commit: Commit, marker: CommitMarker) {
+    func configure(commit: Commit, marker: CommitMarker, tokens: [SearchToken] = []) {
         // Unmerged (other-branch-only) commits render italic and faded, like
         // Gitbox; merge commits keep their existing de-emphasis.
         let deemphasized = commit.isMerge || marker == .unmerged
 
-        title.stringValue = commit.authorName
-        title.font = deemphasized ? RowFont.italic : RowFont.semibold
+        self.tokens = tokens
+        titleFont = deemphasized ? RowFont.italic : RowFont.semibold
+        titleText = commit.authorName
         titleColor = deemphasized ? .secondaryLabelColor : .labelColor
 
         timestamp.stringValue = DateFormat.commitTimestamp.format(commit.date)
@@ -89,8 +98,8 @@ final class CommitRowView: NSTableCellView {
             : .controlAccentColor
         timestamp.isHidden = false
 
-        subtitle.stringValue = commit.subject.isEmpty ? " " : commit.subject
-        subtitle.font = deemphasized ? RowFont.italic : RowFont.body
+        subtitleFont = deemphasized ? RowFont.italic : RowFont.body
+        subtitleText = commit.subject.isEmpty ? " " : commit.subject
 
         dot.isHidden = marker == .none
         dot.layer?.backgroundColor = markerColor(marker).cgColor
@@ -100,15 +109,16 @@ final class CommitRowView: NSTableCellView {
     }
 
     func configureWorkingCopy(title text: String, subtitle subtitleText: String, dirty: Bool) {
-        title.stringValue = text
-        title.font = dirty ? RowFont.semibold : RowFont.body
+        tokens = []
+        titleText = text
+        titleFont = dirty ? RowFont.semibold : RowFont.body
         titleColor = dirty ? .labelColor : .secondaryLabelColor
 
         timestamp.stringValue = ""
         timestamp.isHidden = true
 
-        subtitle.stringValue = subtitleText
-        subtitle.font = RowFont.body
+        self.subtitleText = subtitleText
+        subtitleFont = RowFont.body
 
         dot.isHidden = true
         dot.toolTip = nil
@@ -122,9 +132,15 @@ final class CommitRowView: NSTableCellView {
 
     private func applyColors() {
         let selected = backgroundStyle == .emphasized
-        title.textColor = selected ? .alternateSelectedControlTextColor : titleColor
+        title.setText(
+            titleText, tokens: tokens, font: titleFont,
+            color: selected ? .alternateSelectedControlTextColor : titleColor
+        )
+        subtitle.setText(
+            subtitleText, tokens: tokens, font: subtitleFont,
+            color: selected ? .alternateSelectedControlTextColor : .secondaryLabelColor
+        )
         timestamp.textColor = selected ? .alternateSelectedControlTextColor : timestampColor
-        subtitle.textColor = selected ? .alternateSelectedControlTextColor : .secondaryLabelColor
     }
 
     private func markerColor(_ marker: CommitMarker) -> NSColor {

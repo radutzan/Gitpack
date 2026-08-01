@@ -1,7 +1,7 @@
 import AppKit
 
 /// Commit metadata header, message body, and the files the commit touched.
-final class CommitViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
+final class CommitViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate, NSMenuItemValidation {
     private let appState: AppState
 
     private let shaField = monospacedValueField()
@@ -28,7 +28,9 @@ final class CommitViewController: NSViewController, NSTableViewDataSource, NSTab
 
     private var commit: Commit? {
         guard let vm, case .commit(let sha) = vm.selection else { return nil }
-        return vm.commits.first { $0.id == sha }
+        // Not `vm.commits`: a search result can sit far deeper than the loaded
+        // page, and selecting one has to fill this pane all the same.
+        return vm.commit(withID: sha)
     }
 
     init(appState: AppState) {
@@ -202,7 +204,12 @@ final class CommitViewController: NSViewController, NSTableViewDataSource, NSTab
 
         let body = commit.body.trimmingCharacters(in: .whitespacesAndNewlines)
         let message = body.isEmpty ? commit.subject : commit.subject + "\n\n" + body
-        messageField.stringValue = message
+        messageField.setText(
+            message,
+            tokens: vm.searchTokens,
+            font: NSFont.preferredFont(forTextStyle: .body),
+            color: .labelColor
+        )
         let hasMessage = !message.isEmpty
         messageScroll.isHidden = !hasMessage
         messageDivider.isHidden = !hasMessage
@@ -237,7 +244,13 @@ final class CommitViewController: NSViewController, NSTableViewDataSource, NSTab
                 new.identifier = FileRowView.identifier
                 return new
             }()
-        cell.configure(path: file.path, oldPath: file.oldPath, statusLabel: file.status.label, staged: nil)
+        cell.configure(
+            path: file.path,
+            oldPath: file.oldPath,
+            statusLabel: file.status.label,
+            staged: nil,
+            tokens: vm?.searchTokens ?? []
+        )
         return cell
     }
 
@@ -263,9 +276,30 @@ final class CommitViewController: NSViewController, NSTableViewDataSource, NSTab
         }
         guard menuTargets.count == 1 else { return }
         add(menu, "View Diff", #selector(diffSelected))
+        add(menu, "Show File History", #selector(showFileHistory(_:)))
         menu.addItem(.separator())
         add(menu, "Reveal in Finder", #selector(revealSelected))
         add(menu, "Copy Path", #selector(copySelectedPath))
+    }
+
+    /// ⌘D, and the context menu. Lives on this controller rather than in
+    /// `AppDelegate` so it only validates while the file list has focus — the
+    /// selected path is the one thing the menu bar can't reach on its own.
+    @objc func showFileHistory(_ sender: Any?) {
+        guard let vm, let path = selectedPath else { return }
+        vm.showFileHistory(path: path, using: appState.git)
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(showFileHistory(_:)) { return selectedPath != nil }
+        return true
+    }
+
+    /// Always the selection — `menuNeedsUpdate` pulls a right-clicked row into
+    /// it first, so a context-menu target is a selected row by then too.
+    private var selectedPath: String? {
+        let row = tableView.selectedRow
+        return files.indices.contains(row) ? files[row].path : nil
     }
 
     private func add(_ menu: NSMenu, _ title: String, _ action: Selector) {

@@ -14,6 +14,11 @@ final class FileRowView: NSTableCellView {
     private let statusField = NSTextField(labelWithString: "")
     private let checkbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
 
+    // Re-applied on every selection change, because a highlighted path carries
+    // its colours inside its attributed string.
+    private var pathText = ""
+    private var tokens: [SearchToken] = []
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         build()
@@ -65,10 +70,17 @@ final class FileRowView: NSTableCellView {
 
     /// `staged` nil means a read-only row — the checkbox is hidden but keeps its
     /// width, so commit-detail rows line up with working-copy rows.
-    func configure(path: String, oldPath: String?, statusLabel: String, staged: Bool?) {
+    func configure(
+        path: String,
+        oldPath: String?,
+        statusLabel: String,
+        staged: Bool?,
+        tokens: [SearchToken] = []
+    ) {
         icon.image = NSImage(systemSymbolName: iconName(for: path), accessibilityDescription: nil)
-        pathField.stringValue = displayPath(path: path, oldPath: oldPath)
-        pathField.toolTip = pathField.stringValue
+        self.tokens = tokens
+        pathText = displayPath(path: path, oldPath: oldPath)
+        pathField.toolTip = pathText
         statusField.stringValue = statusLabel
         checkbox.isHidden = staged == nil
         checkbox.state = staged == true ? .on : .off
@@ -81,7 +93,11 @@ final class FileRowView: NSTableCellView {
 
     private func applyColors() {
         let selected = backgroundStyle == .emphasized
-        pathField.textColor = selected ? .alternateSelectedControlTextColor : .labelColor
+        pathField.setText(
+            pathText, tokens: tokens,
+            font: NSFont.preferredFont(forTextStyle: .body),
+            color: selected ? .alternateSelectedControlTextColor : .labelColor
+        )
         statusField.textColor = selected ? .alternateSelectedControlTextColor : .secondaryLabelColor
         icon.contentTintColor = selected ? .alternateSelectedControlTextColor : .secondaryLabelColor
     }

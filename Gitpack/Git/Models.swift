@@ -94,6 +94,14 @@ struct WorkingCopyStatus: Sendable {
     }
 }
 
+/// One page of a live search: the commits that matched, and how many were
+/// examined. The count is what tells the search loop it has reached the end of
+/// history, and what the results bar reports as progress.
+struct CommitSearchPage: Sendable {
+    let matches: [Commit]
+    let scanned: Int
+}
+
 /// The commit-set difference between the current branch and its "other branch"
 /// (Gitbox's comparison target — a remote tracking branch or another local branch).
 struct Divergence: Hashable, Sendable {

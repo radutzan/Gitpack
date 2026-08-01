@@ -19,7 +19,9 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
     private let scrollView = NSScrollView()
     private let placeholder = HistoryPlaceholderView()
     private let errorBanner = ErrorBannerView()
+    private let resultsBar = SearchResultsBar()
     private var rows: [Row] = []
+    private var tokens: [SearchToken] = []
 
     /// Set while pushing the model's selection into the table, so the
     /// delegate callback doesn't write it straight back and re-trigger the
@@ -69,8 +71,11 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
         errorBanner.onDismiss = { [weak self] in
             self?.appState.selectedViewModel?.lastError = nil
         }
+        resultsBar.onClose = { [weak self] in
+            self?.appState.selectedViewModel?.cancelSearch()
+        }
 
-        for subview in [scrollView, placeholder, errorBanner] as [NSView] {
+        for subview in [scrollView, placeholder, resultsBar, errorBanner] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
@@ -80,6 +85,14 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: view.topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            // The bar floats over the list at the top of the safe area, like the
+            // error banner; `additionalSafeAreaInsets` below is what stops the
+            // first row from hiding underneath it.
+            resultsBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            resultsBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            resultsBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            resultsBar.heightAnchor.constraint(equalToConstant: SearchResultsBar.height),
 
             placeholder.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             placeholder.centerYAnchor.constraint(equalTo: view.centerYAnchor),
@@ -109,16 +122,28 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
             scrollView.isHidden = true
             placeholder.isHidden = false
             errorBanner.text = nil
+            showResultsBar(false)
             return
         }
         scrollView.isHidden = false
         placeholder.isHidden = true
 
+        showResultsBar(vm.isSearchActive)
+        if vm.isSearchActive {
+            resultsBar.update(
+                matches: vm.searchResults.count,
+                scanned: vm.searchScanned,
+                searching: vm.isSearching,
+                path: vm.searchPathFilter
+            )
+        }
+
         // Reload only on a real change. This runs on every activation and
         // autofetch; an unconditional reload rebuilds the table mid-click and
         // drops the selection.
         let fresh = makeRows(vm)
-        if fresh != rows {
+        if fresh != rows || tokens != vm.searchTokens {
+            tokens = vm.searchTokens
             // ponytail: restores the pixel offset, not the row you were looking
             // at. Appends (paging) and edits below the fold land exactly; a new
             // commit arriving at the top shifts the view by one row. Anchor on a
@@ -137,12 +162,26 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
     }
 
     private func makeRows(_ vm: RepositoryViewModel) -> [Row] {
+        // While searching there is no working-copy row and no paging row: the
+        // list is exactly the matches, and the search walks history by itself.
+        if vm.isSearchActive {
+            return vm.searchResults.map { .commit($0, marker: vm.marker(for: $0)) }
+        }
         var result: [Row] = [workingCopyRow(vm.status)]
         result.append(contentsOf: vm.commits.map { .commit($0, marker: vm.marker(for: $0)) })
         if vm.hasMoreHistory && !vm.commits.isEmpty {
             result.append(.loadMore)
         }
         return result
+    }
+
+    /// The bar overlays the list, so the pane's safe area has to grow by its
+    /// height — that is what the scroll view's automatic content inset follows,
+    /// and without it the top row sits behind the bar at scroll position zero.
+    private func showResultsBar(_ visible: Bool) {
+        guard resultsBar.isHidden == visible else { return }
+        resultsBar.isHidden = !visible
+        view.additionalSafeAreaInsets.top = visible ? SearchResultsBar.height : 0
     }
 
     private func workingCopyRow(_ status: WorkingCopyStatus?) -> Row {
@@ -197,7 +236,17 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
             }
             return
         }
-        guard let target = rows.firstIndex(where: { item(for: $0) == selection }) else { return }
+        guard let target = rows.firstIndex(where: { item(for: $0) == selection }) else {
+            // The selected commit isn't in the current list — a search that
+            // doesn't match it. Leaving the table's index alone would leave it
+            // highlighting whatever commit inherited that row.
+            if tableView.selectedRow >= 0 {
+                updatingSelection = true
+                tableView.deselectAll(nil)
+                updatingSelection = false
+            }
+            return
+        }
         if tableView.selectedRow != target {
             updatingSelection = true
             tableView.selectRowIndexes([target], byExtendingSelection: false)
@@ -230,7 +279,7 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
 
         case .commit(let commit, let marker):
             let cell = commitCell(tableView)
-            cell.configure(commit: commit, marker: marker)
+            cell.configure(commit: commit, marker: marker, tokens: tokens)
             return cell
         }
     }
@@ -262,10 +311,22 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
         Task { await vm.loadMoreHistory(using: appState.git) }
     }
 
+    /// Esc from anywhere else in the pane. The list itself takes Esc in
+    /// `handleBareKey`, because `NSTableView` consumes `cancelOperation` for its
+    /// own type-select and never forwards it up the chain.
+    override func cancelOperation(_ sender: Any?) {
+        guard let vm = appState.selectedViewModel, vm.isSearchActive else { return }
+        vm.cancelSearch()
+    }
+
     /// Gitbox's bare-key shortcuts, on the focused list so they can't fire
     /// while you're typing a commit message.
     private func handleBareKey(_ key: String) -> Bool {
         if movePaneFocus(for: key) { return true }
+        if key == "\u{1B}", let vm = appState.selectedViewModel, vm.isSearchActive {
+            vm.cancelSearch()
+            return true
+        }
         guard let vm = appState.selectedViewModel, vm.otherBranch != nil, !vm.isSyncing else {
             return false
         }
@@ -280,6 +341,97 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
         default:
             return false
         }
+    }
+}
+
+/// The thin bar over the history list while a search runs: live match count,
+/// a spinner until the walk reaches the end of history, and a close button.
+private final class SearchResultsBar: NSVisualEffectView {
+    static let height: CGFloat = 28
+
+    var onClose: (() -> Void)?
+
+    private let label = NSTextField(labelWithString: "")
+    private let spinner = NSProgressIndicator()
+
+    init() {
+        super.init(frame: .zero)
+        material = .headerView
+        blendingMode = .withinWindow
+        state = .followsWindowActiveState
+        isHidden = true
+
+        label.font = NSFont.preferredFont(forTextStyle: .callout)
+        label.textColor = .secondaryLabelColor
+        label.lineBreakMode = .byTruncatingMiddle
+        label.cell?.usesSingleLineMode = true
+
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isDisplayedWhenStopped = false
+        spinner.setContentHuggingPriority(.required, for: .horizontal)
+
+        let close = NSButton()
+        close.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Clear Search")
+        close.isBordered = false
+        close.bezelStyle = .accessoryBar
+        close.contentTintColor = .secondaryLabelColor
+        close.toolTip = "Clear Search (Esc)"
+        close.target = self
+        close.action = #selector(closeClicked)
+        close.setContentHuggingPriority(.required, for: .horizontal)
+
+        let stack = NSStackView(views: [spinner, label, close])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        let divider = NSBox()
+        divider.boxType = .separator
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(divider)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            divider.leadingAnchor.constraint(equalTo: leadingAnchor),
+            divider.trailingAnchor.constraint(equalTo: trailingAnchor),
+            divider.bottomAnchor.constraint(equalTo: bottomAnchor),
+            // A separator NSBox has no intrinsic height of its own.
+            divider.heightAnchor.constraint(equalToConstant: 1),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("SearchResultsBar is created in code")
+    }
+
+    func update(matches: Int, scanned: Int, searching: Bool, path: String?) {
+        var text = matches == 1 ? "1 commit" : "\(matches) commits"
+        if let path {
+            text = "\((path as NSString).lastPathComponent) — \(text)"
+        }
+        if searching {
+            text += " · searching \(scanned)…"
+        } else if matches == 0 {
+            text = path.map { "No commits touch \(($0 as NSString).lastPathComponent)" } ?? "No matches"
+        }
+        label.stringValue = text
+
+        if searching {
+            spinner.startAnimation(nil)
+        } else {
+            spinner.stopAnimation(nil)
+        }
+    }
+
+    @objc private func closeClicked() {
+        onClose?()
     }
 }
 

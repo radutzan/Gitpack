@@ -7,6 +7,7 @@ extension NSToolbarItem.Identifier {
     static let otherBranchPicker = NSToolbarItem.Identifier("otherBranchPicker")
     static let dividerSpacer = NSToolbarItem.Identifier("dividerSpacer")
     static let repositoryTitle = NSToolbarItem.Identifier("repositoryTitle")
+    static let searchHistory = NSToolbarItem.Identifier("searchHistory")
 }
 
 /// Gitbox's toolbar: current branch, the pull/push pair, and the "other
@@ -19,8 +20,12 @@ final class MainToolbar: NSObject, NSToolbarDelegate {
     /// length — which is also what keeps the divider alignment stable.
     private static let pickerWidth: CGFloat = 192
 
-    /// Room kept clear at the trailing edge.
-    private static let trailingReserve: CGFloat = 24
+    /// Width the search field asks for; the toolbar collapses it to a magnifier
+    /// button when even that doesn't fit.
+    private static let searchWidth: CGFloat = 180
+
+    /// Room kept clear at the trailing edge — the search field's, plus a margin.
+    private static let trailingReserve: CGFloat = 24 + searchWidth
 
     /// ~2s of 50ms re-checks after any layout trigger.
     private static let alignRetryLimit = 40
@@ -57,6 +62,21 @@ final class MainToolbar: NSObject, NSToolbarDelegate {
         return stack
     }()
     private let spacer = SpacerView()
+    /// `NSSearchToolbarItem` rather than a search field in a plain item: it
+    /// collapses to a magnifier when the toolbar runs out of room and it owns
+    /// the ⌘F "begin search" interaction.
+    private lazy var searchItem: NSSearchToolbarItem = {
+        let item = NSSearchToolbarItem(itemIdentifier: .searchHistory)
+        item.label = "Search"
+        item.toolTip = "Search history — messages, authors, file names and changed lines"
+        item.preferredWidthForSearchField = Self.searchWidth
+        item.searchField.delegate = self
+        item.searchField.sendsWholeSearchString = false
+        item.searchField.placeholderString = "Search History"
+        item.searchField.target = self
+        item.searchField.action = #selector(searchFieldChanged(_:))
+        return item
+    }()
     private var modifiers: NSEvent.ModifierFlags = []
     private var flagsMonitor: Any?
     private var alignScheduled = false
@@ -122,6 +142,8 @@ final class MainToolbar: NSObject, NSToolbarDelegate {
             .branchPicker,
             .syncControls,
             .otherBranchPicker,
+            .flexibleSpace,
+            .searchHistory,
         ]
     }
 
@@ -181,6 +203,9 @@ final class MainToolbar: NSObject, NSToolbarDelegate {
             updateSyncControl()
             return item
 
+        case .searchHistory:
+            return searchItem
+
         default:
             return nil
         }
@@ -234,7 +259,21 @@ final class MainToolbar: NSObject, NSToolbarDelegate {
         setTitle(vm?.otherBranch ?? "No Branch", on: otherBranchButton)
         otherBranchButton.isEnabled = !(vm?.remoteBranches.isEmpty ?? true) || (vm?.branches.count ?? 0) > 1
 
+        // Only when it differs, like the commit composer: writing the field on
+        // every keystroke would collapse the insertion point.
+        let query = vm?.searchQuery ?? ""
+        if searchItem.searchField.stringValue != query {
+            searchItem.searchField.stringValue = query
+        }
+        searchItem.searchField.isEnabled = vm != nil
+
         updateSyncControl()
+    }
+
+    /// ⌘F: hand the search field first responder, expanding it if the toolbar
+    /// had collapsed it to a button.
+    func beginSearch() {
+        searchItem.beginSearchInteraction()
     }
 
     private func setTitle(_ title: String, on button: NSPopUpButton) {
@@ -406,6 +445,31 @@ final class MainToolbar: NSObject, NSToolbarDelegate {
         guard let name = sender.representedObject as? String,
               let vm = appState.selectedViewModel else { return }
         Task { await vm.setOtherBranch(name, using: appState.git) }
+    }
+
+    @objc private func searchFieldChanged(_ sender: NSSearchField) {
+        queryChanged(sender.stringValue)
+    }
+
+    /// The debounce lives in the view model, so this can fire on every keystroke
+    /// — and on the cancel button, which is how Esc in the field clears a search.
+    private func queryChanged(_ query: String) {
+        guard let vm = appState.selectedViewModel, vm.searchQuery != query else { return }
+        vm.searchQuery = query
+        if query.isEmpty && vm.searchPathFilter == nil {
+            vm.cancelSearch()
+        } else {
+            vm.updateSearch(using: appState.git)
+        }
+    }
+}
+
+// MARK: - Search field
+
+extension MainToolbar: NSSearchFieldDelegate {
+    func controlTextDidChange(_ notification: Notification) {
+        guard let field = notification.object as? NSSearchField else { return }
+        queryChanged(field.stringValue)
     }
 }
 

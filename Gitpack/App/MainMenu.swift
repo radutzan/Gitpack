@@ -61,6 +61,8 @@ enum MainMenu {
         menu.addItem(withTitle: "Delete", action: #selector(NSText.delete(_:)), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Find", action: #selector(AppDelegate.findInHistory(_:)), keyEquivalent: "f")
         return menu
     }
 
@@ -77,6 +79,14 @@ enum MainMenu {
         rebase.keyEquivalentModifierMask = [.command, .shift]
         let forcePush = menu.addItem(withTitle: "Force Push", action: #selector(AppDelegate.forcePush(_:)), keyEquivalent: "p")
         forcePush.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(.separator())
+        // Validated by whichever file list has focus (that's where the selected
+        // path lives), so it greys out from anywhere else.
+        menu.addItem(
+            withTitle: "Show File History",
+            action: #selector(CommitViewController.showFileHistory(_:)),
+            keyEquivalent: "d"
+        )
         menu.addItem(.separator())
         menu.addItem(withTitle: "Open in Finder", action: #selector(AppDelegate.openInFinder(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Open in Terminal", action: #selector(AppDelegate.openInTerminal(_:)), keyEquivalent: "")

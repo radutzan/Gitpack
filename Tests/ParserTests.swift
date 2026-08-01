@@ -20,6 +20,78 @@ struct ParserTests {
         testLog()
         testRevList()
         testChangeClassifier()
+        testSearchQuery()
+        testSearchLog()
+    }
+
+    // MARK: - SearchQuery
+
+    static func testSearchQuery() {
+        let simple = SearchQuery.parse("  fix   Crash ")
+        check(simple.map(\.text) == ["fix", "Crash"], "query: whitespace splits")
+        check(simple.allSatisfy { !$0.exactCase }, "query: bare tokens are case-insensitive")
+
+        let quoted = SearchQuery.parse(#"fix "NSTable View" tail"#)
+        check(quoted.map(\.text) == ["fix", "NSTable View", "tail"], "query: quoted phrase kept whole")
+        check(quoted[1].exactCase && !quoted[0].exactCase, "query: only the quoted token is exact-case")
+
+        let escaped = SearchQuery.parse(#""say \"hi\"""#)
+        check(escaped.map(\.text) == [#"say "hi""#], "query: escaped quotes inside a phrase")
+
+        let unclosed = SearchQuery.parse(#"a "b c"#)
+        check(unclosed.map(\.text) == ["a", "b c"], "query: unclosed quote closes at the end")
+        check(SearchQuery.parse("   ").isEmpty, "query: whitespace only is no tokens")
+
+        // AND across tokens, and the case rules the tokens carry.
+        check(SearchQuery.matches(SearchQuery.parse("fix crash"), in: "Fix the CRASH"), "query: AND, case-insensitive")
+        check(!SearchQuery.matches(SearchQuery.parse("fix nope"), in: "Fix the CRASH"), "query: one miss fails the AND")
+        check(!SearchQuery.matches(SearchQuery.parse("\"CRASH\""), in: "Fix the crash"), "query: quoted is case-sensitive")
+        check(SearchQuery.matches([], in: "anything"), "query: no tokens matches everything")
+
+        let ranges = SearchQuery.ranges(of: SearchQuery.parse("ab"), in: "ab-AB-ab")
+        check(ranges.count == 3, "query: every occurrence found, both cases")
+    }
+
+    // MARK: - LogParser search pass
+
+    static func testSearchLog() {
+        let us = "\u{1F}", rs = "\u{1E}"
+        func record(_ sha: String, _ subject: String, patch: String) -> String {
+            "\(rs)\(sha)\(us)\(sha.prefix(3))\(us)Radu Dutzan\(us)radu@example.com\(us)" +
+            "2026-07-06T12:00:00Z\(us)p1\(us)\(subject)\(us)\(us)\(patch)"
+        }
+        // git log -p -U0 output: the format record, then the patch, per commit.
+        let raw =
+            record("aaa111", "Rename the widget", patch: """
+            \ndiff --git a/Sources/Widget.swift b/Sources/Widget.swift
+            @@ -3 +3 @@
+            -let name = "old"
+            +let name = "new"\n
+            """) +
+            record("bbb222", "Unrelated", patch: "\ndiff --git a/README.md b/README.md\n@@ -1 +1 @@\n-Hi\n+Hello\n")
+
+        // Body stays empty even though a patch follows it — the trailing US is
+        // what keeps the diff out of `%b`.
+        let all = LogParser.parseSearch(raw, tokens: [])
+        check(all.scanned == 2 && all.matches.count == 2, "search: no tokens matches every commit")
+        check(all.matches[0].subject == "Rename the widget", "search: subject parsed")
+        check(all.matches[0].body.isEmpty, "search: patch does not leak into the body")
+
+        // A removed line, an added line, a path, and metadata all match.
+        check(LogParser.parseSearch(raw, tokens: SearchQuery.parse("\"old\"")).matches.map(\.id) == ["aaa111"], "search: removed line")
+        check(LogParser.parseSearch(raw, tokens: SearchQuery.parse("Hello")).matches.map(\.id) == ["bbb222"], "search: added line")
+        check(LogParser.parseSearch(raw, tokens: SearchQuery.parse("Widget.swift")).matches.map(\.id) == ["aaa111"], "search: file path")
+        check(LogParser.parseSearch(raw, tokens: SearchQuery.parse("radu@example.com")).matches.count == 2, "search: author e-mail")
+        check(LogParser.parseSearch(raw, tokens: SearchQuery.parse("bbb222")).matches.map(\.id) == ["bbb222"], "search: sha")
+        check(LogParser.parseSearch(raw, tokens: SearchQuery.parse("2026-07")).matches.count == 2, "search: date")
+
+        // AND spans the whole record: message term + diff term.
+        check(
+            LogParser.parseSearch(raw, tokens: SearchQuery.parse("rename new")).matches.map(\.id) == ["aaa111"],
+            "search: message term AND diff term"
+        )
+        check(LogParser.parseSearch(raw, tokens: SearchQuery.parse("nothinghere")).matches.isEmpty, "search: no match")
+        check(LogParser.parseSearch("", tokens: []).scanned == 0, "search: empty input")
     }
 
     // MARK: - GitChangeClassifier
@@ -140,9 +212,11 @@ struct ParserTests {
         let us = "\u{1F}", rs = "\u{1E}"
         // Two records: a merge commit with empty body, and a normal commit with
         // a multi-line body containing a US-free but newline-heavy message.
+        // The RS leads each record and a US trails it — that trailing separator
+        // is what keeps a `-p` patch out of `%b` in the search pass.
         let raw =
-            "abc123\(us)abc\(us)Radu Dutzan\(us)radu@example.com\(us)2026-07-06T12:00:00+02:00\(us)p1 p2\(us)Merge branch 'x'\(us)\(rs)" +
-            "def456\(us)def\(us)Someone Else\(us)e@example.com\(us)2026-07-05T09:30:00Z\(us)p1\(us)Fix the thing\(us)Long body line one.\nLine two.\n\(rs)"
+            "\(rs)abc123\(us)abc\(us)Radu Dutzan\(us)radu@example.com\(us)2026-07-06T12:00:00+02:00\(us)p1 p2\(us)Merge branch 'x'\(us)\(us)" +
+            "\(rs)def456\(us)def\(us)Someone Else\(us)e@example.com\(us)2026-07-05T09:30:00Z\(us)p1\(us)Fix the thing\(us)Long body line one.\nLine two.\n\(us)"
         let commits = LogParser.parse(raw)
 
         check(commits.count == 2, "log: record count")

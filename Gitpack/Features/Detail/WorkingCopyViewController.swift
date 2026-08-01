@@ -1,7 +1,7 @@
 import AppKit
 
 /// Commit composer over the staging list.
-final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSTextViewDelegate, NSMenuDelegate {
+final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSTextViewDelegate, NSMenuDelegate, NSMenuItemValidation {
     private let appState: AppState
 
     private let composerBox = NSBox()
@@ -305,6 +305,7 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
         }
         if count == 1 {
             add(menu, "View Diff", #selector(diffSelected))
+            add(menu, "Show File History", #selector(showFileHistory(_:)))
         }
         menu.addItem(.separator())
         if count == 1 {
@@ -336,6 +337,23 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
     @objc private func diffSelected() {
         guard let path = menuTargets.first?.path else { return }
         Task { await openDiff(path) }
+    }
+
+    /// ⌘D and the context menu. On this controller rather than in `AppDelegate`
+    /// so it validates against the focused list's own selection.
+    @objc func showFileHistory(_ sender: Any?) {
+        guard let vm, let path = selectedPath else { return }
+        vm.showFileHistory(path: path, using: appState.git)
+    }
+
+    private var selectedPath: String? {
+        let row = tableView.selectedRow
+        return entries.indices.contains(row) ? entries[row].path : nil
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(showFileHistory(_:)) { return selectedPath != nil }
+        return true
     }
 
     @objc private func revealSelected() {

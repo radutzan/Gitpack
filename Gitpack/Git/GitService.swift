@@ -9,6 +9,18 @@ nonisolated protocol GitService: Sendable {
 
     func workingCopyStatus(at url: URL) async throws -> WorkingCopyStatus
     func log(at url: URL, limit: Int, skip: Int, refs: [String]) async throws -> [Commit]
+    /// One page of live search. Matching happens here rather than in the caller
+    /// so the patches — by far the biggest thing git hands back — never cross
+    /// onto the main actor. Empty `tokens` matches everything, which is how a
+    /// pure path filter (Show File History) reuses this.
+    func searchLog(
+        at url: URL,
+        tokens: [SearchToken],
+        paths: [String],
+        limit: Int,
+        skip: Int,
+        refs: [String]
+    ) async throws -> CommitSearchPage
     func filesInCommit(at url: URL, sha: String) async throws -> [CommitFileChange]
     func divergence(current: String, other: String, at url: URL) async throws -> Divergence
 

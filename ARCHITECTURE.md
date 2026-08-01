@@ -66,6 +66,35 @@ Gitbox's trick so you can pull before committing.
 For the selected repo, the fetch's ref writes land via FSEvents (refs →
 `.full` refresh), so blue dots appear without extra wiring.
 
+## Live history search
+
+No index, by design — Gitbox searched live, and an index would need invalidating
+on every fetch. `RepositoryViewModel.runSearch` walks history a page at a time
+(`git log -p -U0`, 200 commits per page) and appends matches as each page lands,
+so results stream in and Esc stops the walk.
+
+- **Matching happens inside `CLIGitService`**, not in the caller. Patches are by
+  far the biggest thing git returns; filtering there means they never cross onto
+  the main actor. `searchLog` hands back only the commits that matched plus the
+  number scanned.
+- **The haystack is the raw record.** `LogParser.format` leads with RS and ends
+  with US, so a `-p` patch lands inside its own commit's chunk and out of `%b`.
+  Every token is matched against that whole chunk, which is what makes SHA,
+  author, e-mail, ISO date, message, file paths and changed lines all searchable
+  without per-field plumbing. `-U0` keeps context lines out, so a diff match is
+  an added or removed line.
+- **Tokens** (`SearchQuery` in `Parsers.swift`): whitespace splits, all tokens
+  AND, quotes group and switch that token to case-sensitive, an unclosed quote
+  closes at the end. No tokens matches everything — which is how Show File
+  History (⌘D) reuses the same loop with just a pathspec, and skips `-p`.
+- **Show File History and the query share one pipeline and one results bar.**
+  Esc (or the bar's close button) drops query, filter and the running walk.
+
+Ceilings are recorded in the `ponytail:` comment on `runSearch`: cancellation
+lands at page granularity, and `--skip` re-walks the graph from the tips on each
+page. The upgrade path is one streamed `git log -p`, split on the 0x1E byte and
+killed on cancel.
+
 ## Module layout
 
 The UI layer is AppKit throughout — no SwiftUI remains in the target. See
