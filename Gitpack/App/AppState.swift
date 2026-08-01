@@ -124,8 +124,14 @@ final class RepositoryViewModel {
     /// a conflicted merge or cherry-pick exits non-zero and *still* leaves the
     /// working copy in a state the panes have to show.
     func perform(using git: GitService, _ body: () async throws -> Void) async {
-        await run(body)
+        let succeeded = await run(body)
+        // `refreshAll` clears `lastError` when it succeeds — which it will,
+        // because reading the repository is not what failed. Put the failure
+        // back afterwards or the banner never appears and the operation looks
+        // like it simply did nothing.
+        let failure = lastError
         await refreshAll(using: git)
+        if !succeeded { lastError = failure }
     }
 
     private let pageSize = 200
@@ -422,15 +428,28 @@ final class RepositoryViewModel {
         }
     }
 
+    /// The remote the other branch lives on, when the other branch is a remote one.
+    private var upstreamRemote: String? {
+        guard let other = otherBranch, !otherBranchIsLocal else { return nil }
+        let candidates = remotes.map(\.name).filter { other.hasPrefix($0 + "/") }
+        return candidates.max(by: { $0.count < $1.count })
+    }
+
+    /// Where a ref that isn't the current branch — a tag — is pushed or deleted.
+    /// Falls back the way `git push` itself does when there is nothing to derive
+    /// it from. Nil only when the repository has no remotes at all.
+    var defaultRemote: String? {
+        if let upstreamRemote { return upstreamRemote }
+        return remotes.contains { $0.name == "origin" } ? "origin" : remotes.first?.name
+    }
+
     /// Explicit push destination derived from the other branch, Gitbox-style
     /// (`git push <remote> <current>:<remoteBranch>`), so pushing works even
     /// when local and remote branch names differ. Falls back to plain `git push`.
     private var pushTarget: (remote: String?, refspec: String?) {
-        guard let current = currentBranch, let other = otherBranch, !otherBranchIsLocal else {
+        guard let current = currentBranch, let other = otherBranch, let remote = upstreamRemote else {
             return (nil, nil)
         }
-        let candidates = remotes.map(\.name).filter { other.hasPrefix($0 + "/") }
-        guard let remote = candidates.max(by: { $0.count < $1.count }) else { return (nil, nil) }
         let branch = String(other.dropFirst(remote.count + 1))
         return (remote, "\(current):\(branch)")
     }

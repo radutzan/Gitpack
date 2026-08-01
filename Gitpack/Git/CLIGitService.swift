@@ -279,6 +279,20 @@ actor CLIGitService: GitService {
         _ = try await runGit(["tag", "-d", name], at: url)
     }
 
+    func deleteRemoteTag(name: String, remote: String, at url: URL) async throws {
+        // Ask first: `push --delete` on a tag the remote never had is an error,
+        // and a tag that was only ever local is the common case. If the question
+        // itself fails (offline, auth), fall through to the push so the user
+        // gets the real reason rather than a silent no-op.
+        let listed = try await runGit(
+            ["ls-remote", "--tags", remote, "refs/tags/\(name)"],
+            at: url, throwOnFailure: false
+        )
+        let present = !listed.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard listed.exitCode != 0 || present else { return }
+        _ = try await runGit(["push", remote, "--delete", "refs/tags/\(name)"], at: url)
+    }
+
     func addRemote(name: String, remoteURL: String, at url: URL) async throws {
         _ = try await runGit(["remote", "add", name, remoteURL], at: url)
     }

@@ -132,12 +132,24 @@ struct RepositoryActions {
     }
 
     func deleteTag(_ name: String) {
+        guard let vm else { return }
+        let remote = vm.defaultRemote
         guard Prompt.confirm(
             "Delete tag “\(name)”?",
-            detail: "The tag is removed locally. A copy already pushed stays on the remote.",
+            detail: remote.map { "Deletes it here and on \($0), if it was pushed there." }
+                ?? "Deletes it here. This repository has no remote.",
             action: "Delete"
         ) else { return }
-        perform { git, url in try await git.deleteTag(name: name, at: url) }
+        perform { git, url in
+            // The remote first, deliberately. Deleting locally first and then
+            // failing to reach the remote leaves the tag gone here and alive
+            // there — the one outcome nobody can see and everybody assumes away.
+            // This order fails with both copies still standing, and says why.
+            if let remote {
+                try await git.deleteRemoteTag(name: name, remote: remote, at: url)
+            }
+            try await git.deleteTag(name: name, at: url)
+        }
     }
 
     // MARK: - History operations

@@ -60,12 +60,12 @@ Breadth. Toolbar branch popup grows Gitbox's full menu; the commit context menu 
 - ~~Branch popup: local branches ✓, Checkout Tag ▸, Checkout Remote Branch ▸ (creates local tracking branch), Checkout Commit… (detached), New Branch…, New Tag…, Edit Branches and Tags…~~ Done. "Edit Branches and Tags…" opens the settings sheet.
 - ~~Quick Checkout (⌘⇧C): type-to-find branch/tag switcher.~~ Done — a sheet whose search field keeps focus while ↑/↓ drive the list.
 - ~~Commit context menu: New Tag…, New Branch…, Merge, Cherry-pick, Apply as Patch, Checkout…, Revert Commit…, Reset Branch… (auto-stash dirty state first), Delete Tag.~~ Done, plus Copy Commit SHA. "Apply as Patch" is `cherry-pick --no-commit`; Delete Tag only appears on a tagged commit.
-- ~~Tags: create/delete/push-with-branch; shown as badges on history rows and in commit detail; natural version sort.~~ Done. Tags are always annotated so `push --follow-tags` carries them; sorting is git's own `--sort=-version:refname`. **Delete is local only** — pushing a deletion isn't offered.
+- ~~Tags: create/delete/push-with-branch; shown as badges on history rows and in commit detail; natural version sort.~~ Done. Tags are always annotated so `push --follow-tags` carries them; sorting is git's own `--sort=-version:refname`. **Delete removes the remote copy too** — a tag that stays on the remote after you deleted it and pushed is a broken promise. The remote goes first, so a failure leaves both copies standing and says why.
 - ~~Stash: Stash Changes… (auto message from file names, includes untracked), Apply Stash ▸ list, Remove old stashes.~~ Done, as **Remove All Stashes…** — there is no age to filter on without a policy, and the list is short.
 - ~~Rebase conflict state: stage pane shows status + **Cancel / Skip / Continue Rebase** buttons (Gitbox's only "mode"). Merge conflicts stay minimal: conflicted files marked, resolve via external mergetool.~~ Done, and it covers merge, cherry-pick and revert as well as rebase (all four are the same shape). Conflicted files are marked in orange; the selection jumps to the stage pane when an operation stops.
 - ~~Repo Settings sheet: Summary, Branches and Tags, Remotes tabs (add/remove remotes; delete local/remote branches).~~ Done — three configurations of one list controller; tags are deletable there too.
 - ~~File ops on stage rows: Ignore File…, Revert File…, Delete File….~~ Done. "Revert File…" is the existing **Discard Changes…** under the name the rest of this UI uses; Delete moves to the Trash rather than `git rm`, so it stays recoverable.
-- **Not carried over**: undo of operations (parked with the rest of ⌘Z), and pushing a tag deletion.
+- **Not carried over**: undo of operations (parked with the rest of ⌘Z).
 
 ## Milestone 5 — Detail pane & app-shell polish
 

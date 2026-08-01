@@ -55,6 +55,8 @@ nonisolated protocol GitService: Sendable {
     func deleteRemoteBranch(remote: String, branch: String, at url: URL) async throws
     func createTag(name: String, message: String?, ref: String, at url: URL) async throws
     func deleteTag(name: String, at url: URL) async throws
+    /// Deletes the tag on the remote too. A no-op when the remote never had it.
+    func deleteRemoteTag(name: String, remote: String, at url: URL) async throws
 
     /// `commit: false` is Gitbox's "Apply as Patch" — the change lands in the
     /// index and the working copy, with nothing committed.

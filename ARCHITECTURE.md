@@ -111,6 +111,13 @@ Notable decisions:
 - **Tags are always annotated.** `git push --follow-tags` only carries annotated
   tags, and that is what makes Gitbox's "tags push with the branch" free rather
   than a second push. Ordering is git's own `--sort=-version:refname`.
+- **Deleting a tag deletes the remote copy too.** Creation propagates on the
+  next push, so deletion has to as well — a tag you deleted, pushed, and then
+  still find on the remote is a promise the app broke. The remote is deleted
+  *first* (`git ls-remote` to see whether it's even there, then
+  `push --delete`), so a failure leaves both copies standing with an error
+  rather than only the local one gone. The remote is the one push uses: the
+  other branch's, else `origin`, else the only one there is.
 - **Reset stashes first.** A dirty working copy is stashed (`stash push -u`) and
   then the branch is reset hard, so the changes are recoverable from the stash
   list rather than blocking the reset.
