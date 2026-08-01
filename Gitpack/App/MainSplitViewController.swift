@@ -24,12 +24,10 @@ final class MainSplitViewController: NSSplitViewController {
 
         splitView.dividerStyle = .thin
 
-        // Still a plain item, not `sidebarWithViewController:`. The outline view
-        // draws its own `.sourceList` styling, and a sidebar item restores its
-        // width through window state restoration rather than the split view's
-        // autosave — which would leave this one divider behaving differently
-        // from the other. Revisit only alongside `.fullSizeContentView`.
-        let sidebar = NSSplitViewItem(viewController: SidebarViewController(appState: appState))
+        // A real sidebar item: vibrant material, and full-height layout so it
+        // runs up behind the titlebar with the toolbar's tracking separator
+        // sitting on the divider.
+        let sidebar = NSSplitViewItem(sidebarWithViewController: SidebarViewController(appState: appState))
         sidebar.minimumThickness = 180
         sidebar.maximumThickness = 320
         sidebar.holdingPriority = NSLayoutConstraint.Priority(261)

@@ -87,7 +87,10 @@ final class DetailViewController: NSViewController {
         NSLayoutConstraint.activate([
             content.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             content.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            content.topAnchor.constraint(equalTo: view.topAnchor),
+            // Safe area, not the view's top: the window is full-size-content so
+            // the sidebar can run behind the titlebar, and this pane's header
+            // would slide under the toolbar with it.
+            content.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             content.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
     }

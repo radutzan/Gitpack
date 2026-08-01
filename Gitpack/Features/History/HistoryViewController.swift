@@ -87,7 +87,9 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
 
             errorBanner.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
             errorBanner.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
-            errorBanner.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
+            // The scroll view insets itself below the titlebar; the banner
+            // floats over it and has to be told.
+            errorBanner.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
         ])
     }
 
