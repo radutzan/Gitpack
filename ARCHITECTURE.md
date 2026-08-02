@@ -108,9 +108,19 @@ back through the menu plumbing.
 
 Notable decisions:
 
-- **Tags are always annotated.** `git push --follow-tags` only carries annotated
-  tags, and that is what makes Gitbox's "tags push with the branch" free rather
-  than a second push. Ordering is git's own `--sort=-version:refname`.
+- **Tags are always annotated** when Gitpack creates them (a tag with an author
+  and a message is the more useful object), but **pushing carries lightweight
+  ones too** — a tag made with plain `git tag` in the terminal is still a tag you
+  expect to arrive. Ordering is git's own `--sort=-version:refname`.
+- **Push names the tags it sends** rather than using `--follow-tags`, which is
+  annotated-only. The set is `git tag --merged HEAD` minus what
+  `git ls-remote --tags` reports, and both halves earn their keep:
+  `--merged HEAD` stops a tag parked on an unrelated local branch from dragging
+  that branch's commits to the remote (which is what plain `git push --tags`
+  does), and asking the remote stops a locally re-pointed tag from being
+  rejected as "already exists" — a rejection that fails the *whole* push, branch
+  included. It also means Force Push can't clobber a remote tag: anything the
+  remote already has is never in the list.
 - **Deleting a tag deletes the remote copy too.** Creation propagates on the
   next push, so deletion has to as well — a tag you deleted, pushed, and then
   still find on the remote is a promise the app broke. The remote is deleted

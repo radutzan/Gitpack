@@ -341,15 +341,49 @@ actor CLIGitService: GitService {
     }
 
     func push(remote: String?, refspec: String?, force: Bool, at url: URL) async throws {
-        // --follow-tags carries the annotated tags reachable from what's being
-        // pushed, which is Gitbox's "tags push with the branch".
-        var args = ["push", "--follow-tags"]
+        var args = ["push"]
         if force { args.append("--force") }
         if let remote, let refspec {
             args.append(remote)
             args.append(refspec)
+            // Tags by name, which is what makes Gitbox's "tags push with the
+            // branch" cover lightweight ones too. `--follow-tags` only carries
+            // annotated tags, and a tag made with plain `git tag` is still a tag
+            // the user expects to arrive.
+            args.append(contentsOf: await unpushedTagRefspecs(remote: remote, at: url))
+        } else {
+            // No explicit target: a bare `git push` can't carry named refspecs
+            // (they would replace the default one), so git's own annotated-only
+            // rule is the best available.
+            args.append("--follow-tags")
         }
         _ = try await runGit(args, at: url)
+    }
+
+    /// Tags reachable from HEAD that the remote doesn't have yet.
+    ///
+    /// Both halves matter. `--merged HEAD` keeps a tag sitting on some unrelated
+    /// local branch from dragging that branch's commits onto the remote — which
+    /// is exactly what `git push --tags` does. Asking the remote what it already
+    /// has keeps a locally re-pointed tag from being rejected as "already
+    /// exists", which fails the *whole* push, branch included: the rejection
+    /// `--follow-tags` avoids by only ever sending what's missing.
+    private func unpushedTagRefspecs(remote: String, at url: URL) async -> [String] {
+        guard let reachable = try? await runGit(["tag", "--merged", "HEAD"], at: url, throwOnFailure: false)
+        else { return [] }
+        let names = reachable.stdoutString.split(separator: "\n").map(String.init)
+        guard !names.isEmpty else { return [] }
+
+        // "<sha>\trefs/tags/<name>", plus a peeled "…^{}" line per annotated tag.
+        let listed = try? await runGit(["ls-remote", "--tags", remote], at: url, throwOnFailure: false)
+        let onRemote = Set(
+            (listed?.stdoutString ?? "")
+                .split(separator: "\n")
+                .compactMap { $0.split(separator: "\t").last }
+                .filter { !$0.hasSuffix("^{}") }
+                .map { $0.replacingOccurrences(of: "refs/tags/", with: "") }
+        )
+        return names.filter { !onRemote.contains($0) }.map { "refs/tags/\($0)" }
     }
 
     func merge(ref: String, at url: URL) async throws {
