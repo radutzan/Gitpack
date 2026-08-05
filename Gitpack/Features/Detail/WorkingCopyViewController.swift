@@ -114,6 +114,12 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
         composer.textContainer?.widthTracksTextView = true
         composer.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         composer.onFocusChange = { [weak self] _ in self?.updateComposerHeight(animated: true) }
+        // Tab cycles between the two halves of this pane. `handleBareKey` sends
+        // it back the other way.
+        composer.onTabOut = { [weak self] in
+            guard let self else { return }
+            view.window?.makeFirstResponder(tableView)
+        }
 
         let composerScroll = NSScrollView()
         composerScroll.documentView = composer
@@ -306,6 +312,9 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
             guard paths.count == 1, let path = paths.first else { return false }
             Task { await openDiff(path) }
             return true
+        case "\t":
+            view.window?.makeFirstResponder(composer)
+            return true
         default:
             return false
         }
@@ -398,8 +407,16 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        if menuItem.action == #selector(showFileHistory(_:)) { return selectedPath != nil }
-        return true
+        switch menuItem.action {
+        case #selector(showFileHistory(_:)):
+            return selectedPath != nil
+        case #selector(commitChanges(_:)):
+            let staging = !stageableSelection.isEmpty
+            menuItem.title = staging ? "Stage Selected" : "Commit"
+            return staging || vm?.canCommit == true
+        default:
+            return true
+        }
     }
 
     @objc private func revealSelected() {
@@ -463,6 +480,31 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
         guard let vm else { return }
         await vm.run {
             try await appState.diffTool.diffWorkingCopy(repoURL: vm.repository.url, path: path)
+        }
+    }
+
+    /// ⌘↩. Stages the selection while the file list itself has focus, and
+    /// commits everywhere else — one menu item, because a second item with the
+    /// same key equivalent swallows the press whenever it validates as disabled
+    /// instead of falling through to the next one.
+    @objc func commitChanges(_ sender: Any?) {
+        let paths = stageableSelection
+        guard paths.isEmpty else {
+            Task { await stage(paths) }
+            return
+        }
+        guard let vm else { return }
+        Task { await appState.commit(vm) }
+    }
+
+    /// Empty unless the file list is first responder, so ⌘↩ from the composer
+    /// still commits, and empty when everything selected is already staged, so
+    /// the shortcut falls back to committing rather than doing nothing.
+    private var stageableSelection: [String] {
+        guard view.window?.firstResponder === tableView else { return [] }
+        return tableView.selectedRowIndexes.compactMap {
+            guard entries.indices.contains($0), entries[$0].unstagedStatus != nil else { return nil }
+            return entries[$0].path
         }
     }
 
@@ -574,6 +616,13 @@ private enum Composer {
 /// user types, which is too late to grow the box when they click into it.
 private final class ComposerTextView: NSTextView {
     var onFocusChange: ((Bool) -> Void)?
+
+    /// An `NSTextView` that is not a field editor types a tab character instead
+    /// of moving focus, so Tab has to be intercepted to leave the composer.
+    var onTabOut: (() -> Void)?
+
+    override func insertTab(_ sender: Any?) { onTabOut?() }
+    override func insertBacktab(_ sender: Any?) { onTabOut?() }
 
     var isFirstResponderInWindow: Bool {
         window?.firstResponder === self

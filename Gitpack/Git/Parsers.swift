@@ -288,7 +288,10 @@ nonisolated enum PorcelainV2Parser {
             upstream: upstream,
             ahead: ahead,
             behind: behind,
-            entries: entries
+            // Git lists tracked changes first and untracked files after them, so
+            // staging a new file moves it up the list under the caller's feet.
+            // Sorting by path makes a row's position depend on its name alone.
+            entries: entries.sorted { $0.path < $1.path }
         )
     }
 

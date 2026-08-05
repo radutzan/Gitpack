@@ -20,6 +20,11 @@ final class FileRowView: NSTableCellView {
     private var tokens: [SearchToken] = []
     private var conflicted = false
 
+    /// Swapped, not just hidden: a hidden `NSButton` keeps its width, which left
+    /// read-only rows with a gap where a checkbox they can never show would be.
+    private var statusToCheckbox: NSLayoutConstraint!
+    private var statusToEdge: NSLayoutConstraint!
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         build()
@@ -52,6 +57,9 @@ final class FileRowView: NSTableCellView {
             addSubview(subview)
         }
 
+        statusToCheckbox = statusField.trailingAnchor.constraint(equalTo: checkbox.leadingAnchor, constant: -8)
+        statusToEdge = statusField.trailingAnchor.constraint(equalTo: trailingAnchor)
+
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: leadingAnchor),
             icon.widthAnchor.constraint(equalToConstant: 16),
@@ -61,7 +69,7 @@ final class FileRowView: NSTableCellView {
             pathField.centerYAnchor.constraint(equalTo: centerYAnchor),
             pathField.trailingAnchor.constraint(lessThanOrEqualTo: statusField.leadingAnchor, constant: -8),
 
-            statusField.trailingAnchor.constraint(equalTo: checkbox.leadingAnchor, constant: -8),
+            statusToCheckbox,
             statusField.centerYAnchor.constraint(equalTo: centerYAnchor),
 
             checkbox.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -69,8 +77,8 @@ final class FileRowView: NSTableCellView {
         ])
     }
 
-    /// `staged` nil means a read-only row — the checkbox is hidden but keeps its
-    /// width, so commit-detail rows line up with working-copy rows.
+    /// `staged` nil means a read-only row: the checkbox comes out of the layout
+    /// entirely and the status label runs to the trailing edge.
     func configure(
         path: String,
         oldPath: String?,
@@ -87,6 +95,8 @@ final class FileRowView: NSTableCellView {
         self.conflicted = conflicted
         checkbox.isHidden = staged == nil
         checkbox.state = staged == true ? .on : .off
+        statusToCheckbox.isActive = staged != nil
+        statusToEdge.isActive = staged == nil
         applyColors()
     }
 

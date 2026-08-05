@@ -186,6 +186,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case #selector(stageAll(_:)):
             return !(vm?.unstagedPaths.isEmpty ?? true)
         case #selector(commitChanges(_:)):
+            // Reached only when the stage pane is off screen or unfocused —
+            // otherwise `WorkingCopyViewController` claims the selector first
+            // and may have retitled the item to Stage Selected.
+            menuItem.title = "Commit"
             return vm?.canCommit == true
         default:
             return true

@@ -205,21 +205,29 @@ struct ParserTests {
         check(status.ahead == 2 && status.behind == 1, "porcelain: ahead/behind")
         check(status.entries.count == 4, "porcelain: entry count")
 
-        let modified = status.entries[0]
+        // Sorted by path, not by git's emission order — otherwise the untracked
+        // file sits last and jumps up the list the moment it is staged.
+        check(
+            status.entries.map(\.path) == [
+                "Sources/App file.swift", "conflicted.swift", "new/path.swift", "untracked file.txt",
+            ],
+            "porcelain: entries sorted by path"
+        )
+
+        func entry(_ path: String) -> WorkingCopyEntry { status.entries.first { $0.path == path }! }
+
+        let modified = entry("Sources/App file.swift")
         check(modified.path == "Sources/App file.swift", "porcelain: path with space survives -z")
         check(modified.stagedStatus == .modified && modified.unstagedStatus == .modified, "porcelain: MM split")
         check(modified.isPartiallyStaged, "porcelain: partial staging flag")
 
-        let renamed = status.entries[1]
-        check(renamed.path == "new/path.swift" && renamed.oldPath == "old/path.swift", "porcelain: rename paths")
+        let renamed = entry("new/path.swift")
+        check(renamed.oldPath == "old/path.swift", "porcelain: rename paths")
         check(renamed.stagedStatus == .renamed && renamed.unstagedStatus == nil, "porcelain: rename staged only")
         check(renamed.isFullyStaged, "porcelain: rename fully staged")
 
-        let untracked = status.entries[2]
-        check(untracked.path == "untracked file.txt" && untracked.isUntracked, "porcelain: untracked")
-
-        let unmerged = status.entries[3]
-        check(unmerged.path == "conflicted.swift" && unmerged.stagedStatus == .unmerged, "porcelain: unmerged")
+        check(entry("untracked file.txt").isUntracked, "porcelain: untracked")
+        check(entry("conflicted.swift").stagedStatus == .unmerged, "porcelain: unmerged")
 
         // Clean repo, detached HEAD: only headers.
         let detachedRaw = "# branch.oid 1234\u{00}# branch.head (detached)\u{00}"
