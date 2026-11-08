@@ -24,7 +24,8 @@ final class CommitRowView: NSTableCellView {
     // custom subviews — without this, selected rows draw dark text on the
     // accent-coloured highlight.
     private var titleColor: NSColor = .labelColor
-    private var timestampColor: NSColor = .controlAccentColor
+    private var subtitleColor: NSColor = .labelColor
+    private var timestampColor: NSColor = .secondaryLabelColor
 
     // The text has to be re-applied whenever the selection changes, because a
     // highlighted row carries its colours inside its attributed string.
@@ -107,13 +108,12 @@ final class CommitRowView: NSTableCellView {
 
         timestamp.stringValue = DateFormat.commitTimestamp.format(commit.date)
         timestamp.font = deemphasized ? RowFont.italic : RowFont.body
-        timestampColor = deemphasized
-            ? NSColor.controlAccentColor.withAlphaComponent(0.7)
-            : .controlAccentColor
+        timestampColor = deemphasized ? .tertiaryLabelColor : .secondaryLabelColor
         timestamp.isHidden = false
 
         subtitleFont = deemphasized ? RowFont.italic : RowFont.body
         subtitleText = commit.subject.isEmpty ? " " : commit.subject
+        subtitleColor = deemphasized ? .secondaryLabelColor : .labelColor
 
         tagBadge.text = tags.joined(separator: "  ")
 
@@ -136,6 +136,7 @@ final class CommitRowView: NSTableCellView {
 
         self.subtitleText = subtitleText
         subtitleFont = RowFont.body
+        subtitleColor = .secondaryLabelColor
 
         dot.isHidden = true
         dot.toolTip = nil
@@ -165,7 +166,7 @@ final class CommitRowView: NSTableCellView {
         )
         subtitle.setText(
             subtitleText, tokens: tokens, font: subtitleFont,
-            color: selected ? .alternateSelectedControlTextColor : .secondaryLabelColor
+            color: selected ? .alternateSelectedControlTextColor : subtitleColor
         )
         timestamp.textColor = selected ? .alternateSelectedControlTextColor : timestampColor
     }
