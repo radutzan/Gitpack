@@ -180,6 +180,7 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
         tableView.target = self
         tableView.doubleAction = #selector(rowDoubleClicked)
         tableView.onBareKey = { [weak self] key in self?.handleBareKey(key) ?? false }
+        tableView.quickLookURLs = { [weak self] in self?.quickLookURLs(Array(self?.selectedPaths() ?? [])) ?? [] }
 
         let menu = NSMenu()
         menu.delegate = self
@@ -235,6 +236,14 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
 
     private func selectedPaths() -> Set<String> {
         Set(tableView.selectedRowIndexes.compactMap { entries.indices.contains($0) ? entries[$0].path : nil })
+    }
+
+    /// Deleted files have nothing on disk to preview, so they drop out.
+    private func quickLookURLs(_ paths: [String]) -> [URL] {
+        guard let vm else { return [] }
+        return entries.map(\.path).filter(paths.contains)
+            .map { vm.repository.url.appendingPathComponent($0) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     private func restoreSelection(_ paths: Set<String>) {

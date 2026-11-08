@@ -174,6 +174,14 @@ final class CommitViewController: NSViewController, NSTableViewDataSource, NSTab
         tableView.target = self
         tableView.doubleAction = #selector(rowDoubleClicked)
         tableView.onBareKey = { [weak self] key in self?.movePaneFocus(for: key) ?? false }
+        // ponytail: previews the working-copy file, not the commit's version of it;
+        // a `git show` into a temp file would be the upgrade if that matters.
+        tableView.quickLookURLs = { [weak self] in
+            guard let self, let vm else { return [] }
+            return tableView.selectedRowIndexes.compactMap { self.files.indices.contains($0) ? self.files[$0].path : nil }
+                .map { vm.repository.url.appendingPathComponent($0) }
+                .filter { FileManager.default.fileExists(atPath: $0.path) }
+        }
 
         let menu = NSMenu()
         menu.delegate = self
