@@ -33,9 +33,9 @@ final class MainSplitViewController: NSSplitViewController {
         sidebar.holdingPriority = NSLayoutConstraint.Priority(261)
         sidebar.canCollapse = false
 
-        // History is the pane with the lowest holding priority, so it absorbs
-        // window resize; the outer two keep the widths you gave them until
-        // history hits its 320 floor.
+        // History and detail share one holding priority below the sidebar's, so
+        // window resize goes to the two content columns and splits between them
+        // in proportion to their widths; the sidebar keeps the width you gave it.
         let history = NSSplitViewItem(viewController: HistoryViewController(appState: appState))
         history.minimumThickness = 320
         history.holdingPriority = NSLayoutConstraint.Priority(250)
@@ -43,7 +43,7 @@ final class MainSplitViewController: NSSplitViewController {
 
         let detail = NSSplitViewItem(viewController: DetailViewController(appState: appState))
         detail.minimumThickness = 320
-        detail.holdingPriority = NSLayoutConstraint.Priority(260)
+        detail.holdingPriority = NSLayoutConstraint.Priority(250)
         detail.canCollapse = false
 
         addSplitViewItem(sidebar)
