@@ -9,7 +9,7 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
     private var operationBarHeight: NSLayoutConstraint!
     private let composerBox = NSBox()
     private let composer = ComposerTextView()
-    private let composerPlaceholder = NSTextField(labelWithString: "Commit message")
+    private let composerPlaceholder = ClickThroughLabel(labelWithString: "Commit message")
     private let commitButton = NSButton(title: "Commit", target: nil, action: nil)
     private let spinner = NSProgressIndicator()
     private let buttonRow = NSStackView()
@@ -20,7 +20,6 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
     private let emptyLabel = NSTextField(labelWithString: "Working directory clean")
 
     private var entries: [WorkingCopyEntry] = []
-    private var isCommitting = false
     /// Targets for the currently open context menu — the clicked row when it is
     /// outside the selection, otherwise the whole selection.
     private var menuTargets: [WorkingCopyEntry] = []
@@ -150,6 +149,10 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
         commitButton.target = self
         commitButton.action = #selector(commit(_:))
         commitButton.bezelStyle = .rounded
+        // Blur collapses the composer, so a click that took focus would shrink
+        // the box under the pointer mid-click. Tab never reaches it anyway:
+        // the composer's Tab goes to the file list.
+        commitButton.refusesFirstResponder = true
         // Deliberately no keyEquivalent: "\r" would make this the window's
         // default button and swallow Return inside the message box. ⌘↩ lives on
         // the Stage menu, which gets key equivalents before the responder chain.
@@ -230,7 +233,8 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
             composer.string = vm.commitMessage
         }
         composerPlaceholder.isHidden = !vm.commitMessage.isEmpty
-        commitButton.isEnabled = vm.canCommit && !isCommitting
+        commitButton.isEnabled = vm.canCommit && !vm.isCommitting
+        if vm.isCommitting { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
         updateComposerHeight(animated: false)
     }
 
@@ -251,14 +255,15 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
         tableView.selectRowIndexes(indexes, byExtendingSelection: false)
     }
 
-    private var composerExpanded: Bool {
-        composer.isFirstResponderInWindow || !(vm?.commitMessage ?? "").isEmpty
-    }
-
+    /// The box is tall only while focused; the Commit button outlives focus
+    /// when there is a draft to commit.
     private func updateComposerHeight(animated: Bool) {
-        let target = composerExpanded ? Composer.expandedHeight : Composer.collapsedHeight
-        let shouldShowButtons = composerExpanded
+        let focused = composer.hasFocus
+        let target = focused ? Composer.expandedHeight : Composer.collapsedHeight
+        let shouldShowButtons = focused || !(vm?.commitMessage ?? "").isEmpty
         guard composerHeight.constant != target || buttonRow.isHidden == shouldShowButtons else { return }
+        // Collapsed to one line, show the subject rather than wherever the caret was.
+        if !focused { composer.scrollRangeToVisible(NSRange(location: 0, length: 0)) }
         if animated {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.18
@@ -518,16 +523,8 @@ final class WorkingCopyViewController: NSViewController, NSTableViewDataSource, 
     }
 
     @objc func commit(_ sender: Any?) {
-        guard let vm, vm.canCommit, !isCommitting else { return }
-        isCommitting = true
-        commitButton.isEnabled = false
-        spinner.startAnimation(nil)
-        Task {
-            await appState.commit(vm)
-            isCommitting = false
-            spinner.stopAnimation(nil)
-            apply()
-        }
+        guard let vm else { return }
+        Task { await appState.commit(vm) }
     }
 
     // MARK: - Text view
@@ -633,19 +630,26 @@ private final class ComposerTextView: NSTextView {
     override func insertTab(_ sender: Any?) { onTabOut?() }
     override func insertBacktab(_ sender: Any?) { onTabOut?() }
 
-    var isFirstResponderInWindow: Bool {
-        window?.firstResponder === self
-    }
+    /// Tracked here rather than read from `window.firstResponder`: inside
+    /// `resignFirstResponder` the window still reports this view as first
+    /// responder, so the box never collapsed on blur.
+    private(set) var hasFocus = false
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
-        if accepted { onFocusChange?(true) }
+        if accepted { hasFocus = true; onFocusChange?(true) }
         return accepted
     }
 
     override func resignFirstResponder() -> Bool {
         let resigned = super.resignFirstResponder()
-        if resigned { onFocusChange?(false) }
+        if resigned { hasFocus = false; onFocusChange?(false) }
         return resigned
     }
+}
+
+/// The placeholder sits on top of the text view, so clicks on the words
+/// "Commit message" must fall through to it rather than land on the label.
+private final class ClickThroughLabel: NSTextField {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

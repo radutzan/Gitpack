@@ -94,6 +94,9 @@ final class RepositoryViewModel {
     /// menu bar can commit without reaching into the view hierarchy, and so a
     /// draft survives clicking away to a commit and back.
     var commitMessage = ""
+    /// On the model, not the composer, so ⌘↩ and the button share one in-flight
+    /// guard and spinner, and a commit running in one repo can't disable another's.
+    var isCommitting = false
 
     var unstagedPaths: [String] {
         status?.entries.filter { $0.unstagedStatus != nil }.map(\.path) ?? []
@@ -562,11 +565,15 @@ final class AppState {
     /// the menu item and the composer's button can share one implementation
     /// without the menu having to reach into the detail pane.
     func commit(_ vm: RepositoryViewModel) async {
+        guard vm.canCommit, !vm.isCommitting else { return }
+        vm.isCommitting = true
+        defer { vm.isCommitting = false }
         let message = vm.commitMessage
         let committed = await vm.run {
             try await self.git.commit(message: message, at: vm.repository.url)
         }
-        if committed { vm.commitMessage = "" }
+        // Only clear what was committed — anything typed while git ran stays.
+        if committed && vm.commitMessage == message { vm.commitMessage = "" }
         await vm.refreshAll(using: git)
     }
 
