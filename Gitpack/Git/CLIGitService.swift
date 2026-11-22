@@ -140,6 +140,11 @@ actor CLIGitService: GitService {
         return LogParser.parse(result.stdoutString)
     }
 
+    func commitCounts(for shas: [String], at url: URL) async throws -> [String: Int] {
+        let result = try await runGit(["rev-list", "--parents"] + shas, at: url)
+        return RevListParser.ancestorCounts(parents: result.stdoutString, for: shas)
+    }
+
     func searchLog(
         at url: URL,
         tokens: [SearchToken],

@@ -10,7 +10,7 @@ import AppKit
 final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
     private enum Row: Equatable {
         case workingCopy(summary: String, subtitle: String, dirty: Bool)
-        case commit(Commit, marker: CommitMarker, tags: [String])
+        case commit(Commit, marker: CommitMarker, tags: [String], count: Int?)
         case loadMore
     }
 
@@ -172,13 +172,16 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
     private func makeRows(_ vm: RepositoryViewModel) -> [Row] {
         // While searching there is no working-copy row and no paging row: the
         // list is exactly the matches, and the search walks history by itself.
-        if vm.isSearchActive {
-            return vm.searchResults.map { .commit($0, marker: vm.marker(for: $0), tags: vm.tags(for: $0.id)) }
+        let commits = vm.isSearchActive ? vm.searchResults : vm.commits
+        let showsCounts = appState.showsCommitCounts
+        if showsCounts { vm.ensureCommitCounts(for: commits, using: appState.git) }
+        let commitRows: [Row] = commits.map {
+            .commit($0, marker: vm.marker(for: $0), tags: vm.tags(for: $0.id),
+                    count: showsCounts ? vm.commitCounts[$0.id] : nil)
         }
+        if vm.isSearchActive { return commitRows }
         var result: [Row] = [workingCopyRow(vm.status)]
-        result.append(contentsOf: vm.commits.map {
-            .commit($0, marker: vm.marker(for: $0), tags: vm.tags(for: $0.id))
-        })
+        result.append(contentsOf: commitRows)
         if vm.hasMoreHistory && !vm.commits.isEmpty {
             result.append(.loadMore)
         }
@@ -225,7 +228,7 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
     private func item(for row: Row) -> HistoryItem? {
         switch row {
         case .workingCopy: .workingCopy
-        case .commit(let commit, _, _): .commit(commit.id)
+        case .commit(let commit, _, _, _): .commit(commit.id)
         case .loadMore: nil
         }
     }
@@ -287,9 +290,9 @@ final class HistoryViewController: NSViewController, NSTableViewDataSource, NSTa
             cell.configureWorkingCopy(title: summary, subtitle: subtitle, dirty: dirty)
             return cell
 
-        case .commit(let commit, let marker, let tags):
+        case .commit(let commit, let marker, let tags, let count):
             let cell = commitCell(tableView)
-            cell.configure(commit: commit, marker: marker, tags: tags, tokens: tokens)
+            cell.configure(commit: commit, marker: marker, tags: tags, count: count, tokens: tokens)
             return cell
         }
     }

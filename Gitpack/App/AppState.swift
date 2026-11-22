@@ -79,6 +79,41 @@ final class RepositoryViewModel {
 
     func tags(for sha: String) -> [String] { tagNames[sha] ?? [] }
 
+    /// `git rev-list --count` per SHA. A commit's ancestry never changes, so
+    /// entries are never invalidated — only added as rows need them.
+    private(set) var commitCounts: [String: Int] = [:]
+    @ObservationIgnored private var isCountingCommits = false
+
+    /// Fills `commitCounts` for `commits` in the background. Called from the
+    /// history pane's render pass, so every write happens in the task, never
+    /// inside the observation body that called it.
+    func ensureCommitCounts(for commits: [Commit], using git: GitService) {
+        guard !isCountingCommits, commits.contains(where: { commitCounts[$0.id] == nil }) else { return }
+        isCountingCommits = true
+        Task {
+            // A new commit on top of a counted parent needs no git call — that
+            // covers nearly every refresh after the first.
+            var counts = commitCounts
+            var missing: [String] = []
+            for commit in commits.reversed() where counts[commit.id] == nil {
+                if commit.parents.count == 1, let parent = counts[commit.parents[0]] {
+                    counts[commit.id] = parent + 1
+                } else {
+                    missing.append(commit.id)
+                }
+            }
+            if !missing.isEmpty,
+               let fetched = try? await git.commitCounts(for: missing, at: repository.url) {
+                counts.merge(fetched) { old, _ in old }
+            }
+            // Cleared before the write, so the render pass it triggers can ask
+            // for anything still missing. Only written on a real gain: an
+            // unresolvable SHA must not re-trigger that pass, or this loops.
+            isCountingCommits = false
+            if counts.count > commitCounts.count { commitCounts = counts }
+        }
+    }
+
     var divergence: Divergence?
     var selection: HistoryItem?
     var commitFiles: [String: [CommitFileChange]] = [:]
@@ -511,6 +546,11 @@ final class AppState {
     let diffTool: DiffToolService
 
     var selectedRepositoryID: UUID?
+    /// View ▸ Show Commit Count: appends `git rev-list --count` to the date in
+    /// history rows — the number a `rev-list --count` build stamp gives it.
+    var showsCommitCounts = UserDefaults.standard.bool(forKey: "showsCommitCounts") {
+        didSet { UserDefaults.standard.set(showsCommitCounts, forKey: "showsCommitCounts") }
+    }
     private var viewModels: [UUID: RepositoryViewModel] = [:]
     private var backgroundStates: [UUID: RepoBackgroundState] = [:]
     private var autofetchTask: Task<Void, Never>?

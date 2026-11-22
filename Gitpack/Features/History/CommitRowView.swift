@@ -95,6 +95,7 @@ final class CommitRowView: NSTableCellView {
         commit: Commit,
         marker: CommitMarker,
         tags: [String] = [],
+        count: Int? = nil,
         tokens: [SearchToken] = []
     ) {
         // Unmerged (other-branch-only) commits render italic and faded, like
@@ -106,7 +107,8 @@ final class CommitRowView: NSTableCellView {
         titleText = commit.authorName
         titleColor = deemphasized ? .secondaryLabelColor : .labelColor
 
-        timestamp.stringValue = DateFormat.commitTimestamp.format(commit.date)
+        let date = DateFormat.commitTimestamp.format(commit.date)
+        timestamp.stringValue = count.map { "\(date) · \($0)" } ?? date
         timestamp.font = deemphasized ? RowFont.italic : RowFont.body
         timestampColor = deemphasized ? .tertiaryLabelColor : .secondaryLabelColor
         timestamp.isHidden = false

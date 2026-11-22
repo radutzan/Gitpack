@@ -92,6 +92,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     /// ⌘F. The search field lives in the toolbar; the query itself lives on the
     /// view model, so this only has to move focus.
+    @objc func toggleCommitCounts(_ sender: Any?) {
+        appState.showsCommitCounts.toggle()
+    }
+
     @objc func findInHistory(_ sender: Any?) {
         windowController?.beginSearch()
     }
@@ -167,6 +171,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let busy = vm?.isSyncing == true
 
         switch menuItem.action {
+        case #selector(toggleCommitCounts(_:)):
+            menuItem.state = appState.showsCommitCounts ? .on : .off
+            return true
         case #selector(pullOrMerge(_:)):
             menuItem.title = otherIsLocal ? "Merge" : "Pull"
             return hasOther && !busy

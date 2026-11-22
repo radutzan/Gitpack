@@ -13,6 +13,8 @@ nonisolated protocol GitService: Sendable {
 
     func workingCopyStatus(at url: URL) async throws -> WorkingCopyStatus
     func log(at url: URL, limit: Int, skip: Int, refs: [String]) async throws -> [Commit]
+    /// `git rev-list --count` for each SHA, keyed by SHA.
+    func commitCounts(for shas: [String], at url: URL) async throws -> [String: Int]
     /// One page of live search. Matching happens here rather than in the caller
     /// so the patches — by far the biggest thing git hands back — never cross
     /// onto the main actor. Empty `tokens` matches everything, which is how a

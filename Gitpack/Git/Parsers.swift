@@ -214,6 +214,63 @@ nonisolated enum RevListParser {
         }
         return (left, right)
     }
+
+    /// Ancestor counts (`git rev-list --count <sha>`, the number the build
+    /// script stamps) for `targets`, from one `git rev-list --parents <targets>`
+    /// walk: each line is a commit followed by its parents. A single-parent
+    /// commit is its parent's count plus one; a merge or a root is counted by
+    /// walking its ancestry.
+    // ponytail: one full ancestry walk per merge reached along a first-parent
+    // chain, so O(merges × history) and the whole graph in memory. Fine into
+    // the tens of thousands of commits; past that, git's commit-graph
+    // generation data or a cached per-repo table is the upgrade.
+    static func ancestorCounts(parents text: String, for targets: [String]) -> [String: Int] {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+            .map { $0.split(separator: " ") }
+        var index: [Substring: Int] = [:]
+        for (i, fields) in lines.enumerated() { index[fields[0]] = i }
+        // Parents outside the walk (a shallow boundary) are dropped, as git does.
+        let parents = lines.map { $0.dropFirst().compactMap { index[$0] } }
+
+        var memo = [Int](repeating: 0, count: lines.count)
+        var seen = [Int](repeating: -1, count: lines.count)
+
+        func walk(_ start: Int) -> Int {
+            var stack = [start]
+            seen[start] = start
+            var count = 0
+            while let node = stack.popLast() {
+                count += 1
+                for parent in parents[node] where seen[parent] != start {
+                    seen[parent] = start
+                    stack.append(parent)
+                }
+            }
+            return count
+        }
+
+        func count(_ start: Int) -> Int {
+            var chain: [Int] = []
+            var node = start
+            while memo[node] == 0, parents[node].count == 1 {
+                chain.append(node)
+                node = parents[node][0]
+            }
+            if memo[node] == 0 { memo[node] = walk(node) }
+            var total = memo[node]
+            for link in chain.reversed() {
+                total += 1
+                memo[link] = total
+            }
+            return memo[start]
+        }
+
+        var result: [String: Int] = [:]
+        for sha in targets {
+            if let i = index[Substring(sha)] { result[sha] = count(i) }
+        }
+        return result
+    }
 }
 
 // MARK: - Porcelain v2 parser

@@ -15,6 +15,7 @@ enum MainMenu {
         main.addItem(submenu(appMenu(), title: "Gitpack"))
         main.addItem(submenu(fileMenu(), title: "File"))
         main.addItem(submenu(editMenu(), title: "Edit"))
+        main.addItem(submenu(viewMenu(), title: "View"))
         main.addItem(submenu(repositoryMenu(stashDelegate: stashDelegate), title: "Repository"))
         main.addItem(submenu(stageMenu(), title: "Stage"))
         main.addItem(submenu(windowMenu(), title: "Window"))
@@ -65,6 +66,12 @@ enum MainMenu {
         menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Find", action: #selector(AppDelegate.findInHistory(_:)), keyEquivalent: "f")
+        return menu
+    }
+
+    private static func viewMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Show Commit Count", action: #selector(AppDelegate.toggleCommitCounts(_:)), keyEquivalent: "")
         return menu
     }
 

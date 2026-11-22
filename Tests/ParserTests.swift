@@ -178,6 +178,11 @@ struct ParserTests {
 
         let (l3, r3) = RevListParser.parseLeftRight("<only\n")
         check(l3 == ["only"] && r3.isEmpty, "rev-list: one-sided")
+
+        // git rev-list --parents d  — root a, branches b and c merged at m.
+        let graph = "d m\nm b c\nc a\nb a\na\n"
+        let counts = RevListParser.ancestorCounts(parents: graph, for: ["d", "m", "c", "a", "zzz"])
+        check(counts == ["d": 5, "m": 4, "c": 2, "a": 1], "rev-list: ancestor counts through a merge")
     }
 
     // MARK: - PorcelainV2Parser
